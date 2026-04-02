@@ -1,0 +1,31 @@
+title: Email Delivery Pipeline
+
+participant Sender MUA as Sender
+participant Sending MTA as SMTA
+participant DNS as DNS
+participant Receiving MTA as RMTA
+participant SpamAssassin as Spam
+participant Mailbox as MB
+participant Recipient MUA as Recip
+
+Sender->>SMTA: SMTP: MAIL FROM, RCPT TO, DATA
+SMTA->>SMTA: DKIM sign message
+SMTA->>DNS: MX lookup for recipient.com
+DNS-->>SMTA: mx1.recipient.com (priority 10)
+SMTA->>RMTA: SMTP STARTTLS + deliver message
+note over RMTA: Check SPF record
+RMTA->>DNS: TXT lookup _spf.sender.com
+DNS-->>RMTA: v=spf1 include:mail.sender.com
+note right of RMTA: SPF: PASS
+note over RMTA: Verify DKIM signature
+RMTA->>DNS: TXT lookup selector._domainkey.sender.com
+DNS-->>RMTA: DKIM public key
+note right of RMTA: DKIM: PASS
+RMTA->>Spam: Score message
+Spam-->>RMTA: Score: 1.2 (ham)
+note right of RMTA: Below spam threshold (5.0)
+RMTA->>MB: Deliver to INBOX
+MB-->>RMTA: Stored
+RMTA-->>SMTA: 250 OK
+Recip->>MB: IMAP FETCH
+MB-->>Recip: New message from Sender

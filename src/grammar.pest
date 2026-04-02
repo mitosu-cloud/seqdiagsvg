@@ -1,0 +1,64 @@
+// Sequence diagram PEG grammar
+// Based on bramp/js-sequence-diagrams syntax
+
+WHITESPACE = _{ " " | "\t" }
+
+document = { SOI ~ (line ~ newline)* ~ line? ~ EOI }
+
+line = _{ comment | statement | empty_line }
+
+comment = _{ "#" ~ (!newline ~ ANY)* }
+
+empty_line = _{ WHITESPACE* }
+
+statement = _{
+    title_stmt
+  | participant_stmt
+  | note_stmt
+  | message_stmt
+}
+
+newline = _{ "\r\n" | "\n" | "\r" }
+
+// title: Some Title
+title_stmt = { ^"title" ~ ":"? ~ message_text }
+
+// participant Alice as A
+participant_stmt = { ^"participant" ~ participant_rest }
+participant_rest = @{ (!newline ~ ANY)+ }
+
+// note left of Alice: some text
+// note right of Bob: some text
+// note over Alice: some text
+// note over Alice, Bob: some text
+note_stmt = { ^"note" ~ note_position ~ ":" ~ message_text }
+
+note_position = _{
+    note_left_of
+  | note_right_of
+  | note_over
+}
+
+note_left_of  = { ^"left" ~ ^"of" ~ actor_name }
+note_right_of = { ^"right" ~ ^"of" ~ actor_name }
+note_over     = { ^"over" ~ actor_name ~ ("," ~ actor_name)? }
+
+// Alice->Bob: Hello
+// Alice-->Bob: Response
+// Alice->>Bob: Async
+// Alice-->>Bob: Async Response
+message_stmt = { actor_name ~ arrow ~ actor_name ~ ":" ~ message_text }
+
+// Arrow variants: -->> must come before --> which must come before ->> and ->
+arrow = {
+    "-->>" | "-->" | "->>" | "->"
+}
+
+// Actor names: everything up to an arrow, colon, comma, or keyword boundary
+// We use a greedy match up to the delimiter
+actor_name = @{ actor_char+ }
+actor_char = _{ !(arrow_start | ":" | "," | newline) ~ ANY }
+arrow_start = _{ ("-->" | "->") }
+
+// Message text: everything to end of line
+message_text = @{ (!newline ~ ANY)+ }

@@ -1,0 +1,31 @@
+title: WebSocket Chat with Presence
+
+participant Alice Browser as A
+participant WebSocket Server as WS
+participant Redis PubSub as Redis
+participant Bob Browser as B
+
+A->>WS: WS Connect /chat?token=xxx
+note over WS: Validate token, register connection
+WS->>Redis: SADD online_users "alice"
+WS->>Redis: PUBLISH presence { alice: online }
+Redis-->>B: presence: alice is online
+WS-->>A: Connected { room: "general" }
+note over A: Alice types a message
+A->>WS: { type: "message", text: "Hey Bob!" }
+WS->>WS: Validate & sanitize
+WS->>Redis: PUBLISH chat:general { from: alice }
+note over WS: Persist to message store
+Redis-->>B: chat message from alice
+WS-->>A: { type: "ack", msgId: "msg_301" }
+B->>WS: { type: "typing", room: "general" }
+WS->>Redis: PUBLISH typing { user: bob }
+Redis-->>A: bob is typing...
+B->>WS: { type: "message", text: "Hi Alice!" }
+WS->>Redis: PUBLISH chat:general { from: bob }
+Redis-->>A: chat message from bob
+note over A: Alice closes tab
+A-->WS: Connection closed
+WS->>Redis: SREM online_users "alice"
+WS->>Redis: PUBLISH presence { alice: offline }
+Redis-->>B: presence: alice is offline

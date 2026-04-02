@@ -1,0 +1,22 @@
+title: GraphQL Query Execution
+
+participant Client as C
+participant API Gateway as GW
+participant GraphQL Engine as GQL
+participant User Service as Users
+participant Posts Service as Posts
+participant DataLoader as DL
+
+C->>GW: POST /graphql { query: "{ user(id:1) { name posts { title } } }" }
+GW->>GQL: Execute query
+GQL->>GQL: Parse & validate query
+note over GQL: Build execution plan
+GQL->>Users: Resolve user(id:1)
+Users-->>GQL: { id:1, name:"Alice" }
+GQL->>DL: Batch resolve posts for user 1
+DL->>Posts: GET /posts?userId=1
+Posts-->>DL: [ {id:10, title:"Hello"}, {id:11, title:"World"} ]
+DL-->>GQL: 2 posts loaded
+note over GQL: Assemble response tree
+GQL-->>GW: { data: { user: { name, posts } } }
+GW-->>C: 200 OK { data: ... }

@@ -1,0 +1,38 @@
+title: Database Connection Pool - Query with Retry
+
+participant Application as App
+participant Connection Pool as Pool
+participant DB Connection as Conn
+participant PostgreSQL as DB
+
+App->>Pool: getConnection()
+note over Pool: Pool size: 3/10 active
+Pool-->>App: Connection #4
+App->>Conn: BEGIN
+Conn->>DB: BEGIN
+DB-->>Conn: OK
+App->>Conn: SELECT * FROM accounts WHERE id=$1
+Conn->>DB: Execute prepared statement
+DB-->>Conn: ResultSet (1 row)
+Conn-->>App: Row { id: 42, balance: 1500 }
+App->>Conn: UPDATE accounts SET balance=balance-200
+Conn->>DB: Execute prepared statement
+DB-->>Conn: ERROR: deadlock detected
+note right of Conn: Transaction aborted
+Conn-->>App: DatabaseError (deadlock)
+App->>Conn: ROLLBACK
+Conn->>DB: ROLLBACK
+DB-->>Conn: OK
+note over App: Retry attempt 1 (backoff: 50ms)
+App->>Conn: BEGIN
+Conn->>DB: BEGIN
+DB-->>Conn: OK
+App->>Conn: UPDATE accounts SET balance=balance-200
+Conn->>DB: Execute prepared statement
+DB-->>Conn: UPDATE 1
+App->>Conn: COMMIT
+Conn->>DB: COMMIT
+DB-->>Conn: OK
+Conn-->>App: Success
+App->>Pool: releaseConnection(#4)
+note over Pool: Connection returned, 3/10 active

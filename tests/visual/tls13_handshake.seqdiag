@@ -1,0 +1,18 @@
+title: TLS 1.3 Handshake
+
+participant Client as C
+participant Server as S
+
+note over C: Generate ephemeral key pair
+C->>S: ClientHello (versions, key_share, ciphers)
+note over S: Select cipher suite, generate keys
+S-->>C: ServerHello (version, key_share)
+S-->>C: EncryptedExtensions
+S-->>C: Certificate
+S-->>C: CertificateVerify (signature)
+S-->>C: Finished (HMAC)
+note over C: Verify cert chain + signature
+C->>S: Finished (HMAC)
+note over C, S: Derive application traffic keys
+C->>S: Application Data (encrypted)
+S-->>C: Application Data (encrypted)

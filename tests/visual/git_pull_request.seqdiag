@@ -1,0 +1,35 @@
+title: Git Pull Request Workflow
+
+participant Developer as Dev
+participant Local Git as Git
+participant GitHub as GH
+participant CI/CD as CI
+participant Reviewer as Rev
+participant Main Branch as Main
+
+Dev->>Git: git checkout -b feature/login
+Dev->>Git: git commit -m "Add login form"
+Dev->>Git: git commit -m "Add validation"
+Dev->>Git: git push origin feature/login
+Git->>GH: Push branch (2 commits)
+Dev->>GH: Create Pull Request
+note over GH: PR #42: Add login feature
+GH->>CI: Trigger checks
+CI->>CI: Run tests (87 passed)
+CI->>CI: Run linter (0 warnings)
+CI-->>GH: All checks passed
+GH->>Rev: Request review
+Rev->>GH: Review code
+Rev-->>GH: Comment: "Add error handling"
+GH-->>Dev: Review: changes requested
+Dev->>Git: git commit -m "Add error handling"
+Dev->>Git: git push origin feature/login
+Git->>GH: Push (1 new commit)
+GH->>CI: Re-trigger checks
+CI-->>GH: All checks passed
+GH->>Rev: Re-request review
+Rev-->>GH: Approve
+Dev->>GH: Squash and merge
+GH->>Main: Merge PR #42
+note over Main: feature/login merged
+GH->>CI: Trigger deploy pipeline

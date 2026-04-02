@@ -1,0 +1,24 @@
+title: DNS Resolution - www.example.com
+
+participant User App as App
+participant Stub Resolver as Stub
+participant Recursive Resolver as Recur
+participant Root NS as Root
+participant .com TLD NS as TLD
+participant example.com NS as Auth
+
+App->>Stub: getaddrinfo("www.example.com")
+Stub->>Recur: Query: www.example.com A?
+note over Recur: Check cache - miss
+Recur->>Root: www.example.com A?
+Root-->>Recur: Referral: .com NS a.gtld-servers.net
+note right of Recur: Cache .com NS (TTL 48h)
+Recur->>TLD: www.example.com A?
+TLD-->>Recur: Referral: example.com NS ns1.example.com
+note right of Recur: Cache NS (TTL 2d)
+Recur->>Auth: www.example.com A?
+Auth-->>Recur: Answer: 93.184.216.34 (TTL 3600)
+note right of Recur: Cache A record (TTL 1h)
+Recur-->>Stub: 93.184.216.34
+Stub-->>App: 93.184.216.34
+note over Recur: Subsequent queries from cache

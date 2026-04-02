@@ -1,0 +1,23 @@
+title: Order Saga - Distributed Transaction
+
+participant API Gateway as GW
+participant Order Service as Orders
+participant Payment Service as Pay
+participant Inventory Service as Inv
+participant Shipping Service as Ship
+participant Notification Service as Notify
+
+GW->>Orders: POST /orders { items, payment }
+Orders->>Orders: Create order (PENDING)
+Orders->>Inv: Reserve inventory
+Inv-->>Orders: Inventory reserved
+Orders->>Pay: Charge payment
+Pay->>Pay: Process credit card
+Pay-->>Orders: Payment confirmed (txnId)
+note over Orders: Update status=CONFIRMED
+Orders->>Ship: Schedule shipment
+Ship-->>Orders: Shipment scheduled (trackingId)
+Orders->>Notify: Send confirmation email
+Notify-->>Orders: Email queued
+Orders-->>GW: 201 Created { orderId, trackingId }
+note over Orders, Pay: On failure: compensating transactions

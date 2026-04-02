@@ -1,0 +1,33 @@
+title: Cache Read-Through with Stampede Prevention
+
+participant Client A as A
+participant Client B as B
+participant App Server as App
+participant Redis as Cache
+participant PostgreSQL as DB
+
+A->>App: GET /products/99
+App->>Cache: GET product:99
+Cache-->>App: (nil)
+note right of App: Cache miss
+App->>Cache: SET product:99:lock NX EX 5
+Cache-->>App: OK (lock acquired)
+note over App: This request populates cache
+B->>App: GET /products/99
+App->>Cache: GET product:99
+Cache-->>App: (nil)
+App->>Cache: SET product:99:lock NX EX 5
+Cache-->>App: (nil) - lock exists
+note right of App: Wait with backoff
+App->>DB: SELECT * FROM products WHERE id=99
+DB-->>App: { id:99, name:Widget, price:29.99 }
+App->>Cache: SETEX product:99 600 { ... }
+Cache-->>App: OK
+App->>Cache: DEL product:99:lock
+Cache-->>App: OK
+App-->>A: 200 { id:99, name:Widget }
+note over App: Client B retries
+App->>Cache: GET product:99
+Cache-->>App: { id:99, name:Widget }
+note right of App: Cache hit!
+App-->>B: 200 { id:99, name:Widget }

@@ -1,0 +1,19 @@
+title: 用户认证流程
+
+participant 客户端 as Client
+participant 网关服务 as GW
+participant 认证服务 as Auth
+participant 数据库 as DB
+
+Client->>GW: POST /登录 { 用户名, 密码 }
+GW->>Auth: 验证用户凭证
+Auth->>DB: SELECT * FROM 用户表 WHERE 名称=$1
+DB-->>Auth: 用户记录 { 角色: 管理员 }
+note right of Auth: 生成JWT令牌
+Auth-->>GW: { 令牌, 过期时间: 3600秒 }
+GW-->>Client: 200 OK { access_token }
+note over Client: 保存令牌到本地存储
+Client->>GW: GET /用户资料 (Bearer 令牌)
+GW->>Auth: 验证令牌有效性
+Auth-->>GW: 有效 (用户ID=42)
+GW-->>Client: { 姓名: "张三", 邮箱: "zhang@例.cn" }

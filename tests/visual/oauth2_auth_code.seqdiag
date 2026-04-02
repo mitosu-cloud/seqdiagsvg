@@ -1,0 +1,24 @@
+title: OAuth 2.0 Authorization Code Flow
+
+participant User as U
+participant Browser as B
+participant App Server as App
+participant Auth Server as Auth
+participant Resource Server as RS
+
+U->>B: Click "Login with Google"
+B->>App: GET /auth/google
+App-->>B: 302 Redirect to Auth Server
+B->>Auth: GET /authorize?response_type=code
+Auth-->>B: Show login/consent page
+U->>B: Enter credentials & grant consent
+B->>Auth: POST /login (credentials)
+Auth-->>B: 302 Redirect with ?code=abc123
+B->>App: GET /callback?code=abc123
+App->>Auth: POST /token (code, client_secret)
+Auth-->>App: { access_token, refresh_token }
+note right of App: Store tokens in session
+App->>RS: GET /api/userinfo (Bearer token)
+RS-->>App: { email, name, avatar }
+App-->>B: 302 Redirect to /dashboard
+B-->>U: Show logged-in dashboard

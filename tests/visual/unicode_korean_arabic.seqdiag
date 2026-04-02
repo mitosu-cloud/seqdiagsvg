@@ -1,0 +1,15 @@
+title: Multilingual API Gateway
+
+participant 사용자 as User
+participant API 게이트웨이 as GW
+participant خدمة المصادقة as Auth
+participant Сервер данных as DB
+
+사용자->>API 게이트웨이: GET /api/profil (토큰)
+API 게이트웨이->>خدمة المصادقة: التحقق من الرمز المميز
+note right of خدمة المصادقة: Token verified
+خدمة المصادقة-->>API 게이트웨이: صالح (user_id=7)
+API 게이트웨이->>Сервер данных: SELECT * FROM пользователи
+Сервер данных-->>API 게이트웨이: { имя: "김민수", город: "서울" }
+note over API 게이트웨이: Transform response
+API 게이트웨이-->>사용자: 200 OK { 이름: "김민수" }

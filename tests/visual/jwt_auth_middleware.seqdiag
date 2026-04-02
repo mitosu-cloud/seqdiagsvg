@@ -1,0 +1,30 @@
+title: JWT Auth Middleware Pipeline
+
+participant Mobile App as App
+participant API Gateway as GW
+participant Auth Middleware as Auth
+participant Rate Limiter as RL
+participant User Service as Users
+participant Redis as Redis
+
+App->>GW: GET /api/v1/profile (Bearer eyJhb...)
+GW->>RL: Check rate limit (client_ip)
+RL->>Redis: INCR rate:192.168.1.50
+Redis-->>RL: count=47
+note right of RL: Under limit (100/min)
+RL-->>GW: Allowed
+GW->>Auth: Validate token
+Auth->>Auth: Decode JWT header
+note over Auth: Verify RS256 + exp + iss claims
+Auth->>Redis: GET blacklist:jti:abc123
+Redis-->>Auth: (nil)
+note right of Auth: Token not revoked
+Auth-->>GW: Valid (sub=user_42)
+GW->>Users: GET /internal/users/42/profile
+Users->>Redis: GET user:42:profile
+Redis-->>Users: (nil)
+note right of Users: Cache miss
+Users->>Users: Query database
+Users-->>Redis: SETEX user:42:profile 300 {...}
+Users-->>GW: { id: 42, name: "Jane" }
+GW-->>App: 200 OK { id: 42, name: "Jane" }

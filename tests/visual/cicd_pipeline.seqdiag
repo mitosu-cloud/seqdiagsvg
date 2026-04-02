@@ -1,0 +1,30 @@
+title: CI/CD Pipeline - Deploy to Production
+
+participant Developer as Dev
+participant GitHub as GH
+participant CI Runner as CI
+participant Docker Registry as Reg
+participant Kubernetes as K8s
+participant Slack as Slack
+
+Dev->>GH: git push origin main
+GH->>CI: Webhook: push event (sha: a1b2c3)
+note over CI: Spin up build environment
+CI->>GH: Clone repo @ a1b2c3
+GH-->>CI: Source code
+CI->>CI: npm install
+CI->>CI: npm run lint
+CI->>CI: npm run test (142 tests)
+note right of CI: All tests passed (34s)
+CI->>CI: docker build -t app:a1b2c3
+CI->>Reg: docker push app:a1b2c3
+Reg-->>CI: Push complete (cache hit 4/6 layers)
+CI->>K8s: kubectl set image deploy/app app:a1b2c3
+K8s->>K8s: Rolling update (3 replicas)
+note over K8s: Replace pods one-by-one
+K8s-->>CI: Rollout complete
+CI->>K8s: Run smoke tests /healthz
+K8s-->>CI: 200 OK { status: healthy }
+CI->>GH: POST commit status: success
+CI->>Slack: Deploy succeeded: app@a1b2c3
+Slack-->>Dev: #deploys: app deployed to prod

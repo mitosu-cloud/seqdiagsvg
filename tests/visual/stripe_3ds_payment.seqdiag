@@ -1,0 +1,35 @@
+title: Stripe Payment with 3D Secure
+
+participant Customer as Cust
+participant Frontend as FE
+participant Backend as BE
+participant Stripe API as Stripe
+participant Bank as Bank
+participant Webhook Handler as WH
+
+Cust->>FE: Enter card details
+FE->>Stripe: createPaymentMethod({ card })
+Stripe-->>FE: pm_xxx
+FE->>BE: POST /checkout { paymentMethodId, cartId }
+BE->>BE: Calculate total, validate cart
+BE->>Stripe: POST /payment_intents { amount, pm }
+Stripe-->>BE: { status: requires_action, secret }
+note over BE: 3D Secure required
+BE-->>FE: { requiresAction: true, clientSecret }
+FE->>Stripe: handleCardAction(clientSecret)
+Stripe-->>FE: Redirect to 3DS
+FE-->>Cust: Show bank verification page
+Cust->>Bank: Enter 3DS code
+Bank-->>Stripe: Authentication success
+Stripe-->>FE: { status: succeeded }
+FE->>BE: POST /checkout/confirm { paymentIntentId }
+BE->>Stripe: GET /payment_intents/pi_xxx
+Stripe-->>BE: { status: succeeded, amount: 4999 }
+note over BE: Create order, mark cart purchased
+BE-->>FE: { orderId: ord_123, confirmed }
+FE-->>Cust: Order confirmed! Thank you.
+note over Stripe, WH: Async webhook delivery
+Stripe->>WH: POST /webhooks/stripe { succeeded }
+WH->>WH: Verify signature
+WH->>WH: Reconcile with order
+WH-->>Stripe: 200 OK
