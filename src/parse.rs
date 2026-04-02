@@ -160,18 +160,31 @@ fn parse_arrow(s: &str) -> Arrow {
 }
 
 /// Extract the ordered list of unique actors from a document.
-/// Participant declarations come first (in order), then any remaining actors
-/// from messages in order of first appearance.
+/// Returns (reference_name, display_name) pairs.
+///
+/// When `participant Foo as F` is used, "F" is the reference name (used in
+/// messages) and "Foo" is the display label shown in boxes. Participant
+/// declarations come first (in order), then any remaining actors from messages
+/// in order of first appearance.
 pub fn resolve_actors(doc: &Document) -> Vec<(String, String)> {
-    let mut actors: Vec<(String, String)> = Vec::new(); // (name, display_name)
+    let mut actors: Vec<(String, String)> = Vec::new(); // (reference_name, display_name)
     let mut seen = std::collections::HashSet::new();
 
     // First pass: participant declarations define explicit ordering
     for stmt in &doc.statements {
         if let Statement::Participant { actor, alias } = stmt {
-            if seen.insert(actor.clone()) {
-                let display = alias.as_deref().unwrap_or(actor).to_string();
-                actors.push((actor.clone(), display));
+            // If alias exists: alias is the short reference name, actor is the display label.
+            // If no alias: actor is both the reference name and the display label.
+            let (ref_name, display) = match alias {
+                Some(a) => (a.clone(), actor.clone()),
+                None => (actor.clone(), actor.clone()),
+            };
+            if seen.insert(ref_name.clone()) {
+                // Also mark the other name as seen so it won't create a duplicate
+                if let Some(a) = alias {
+                    seen.insert(actor.clone());
+                }
+                actors.push((ref_name, display));
             }
         }
     }
@@ -401,5 +414,17 @@ Server-->Client: 200 OK";
         let input = "# This is a comment\nAlice->Bob: hi\n# Another comment";
         let doc = parse_document(input).unwrap();
         assert_eq!(doc.statements.len(), 1);
+    }
+
+    #[test]
+    fn test_resolve_actors_alias_is_reference() {
+        let input = "participant User as U\nparticipant Server as S\nU->S: hello";
+        let doc = parse_document(input).unwrap();
+        let actors = resolve_actors(&doc);
+        assert_eq!(actors.len(), 2); // no duplicates
+        assert_eq!(actors[0].0, "U"); // reference name is the alias
+        assert_eq!(actors[0].1, "User"); // display name is the full name
+        assert_eq!(actors[1].0, "S");
+        assert_eq!(actors[1].1, "Server");
     }
 }

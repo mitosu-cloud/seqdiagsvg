@@ -238,7 +238,7 @@ pub fn layout_diagram(
         })
         .collect();
 
-    y_cursor = top_box_y + actor_box_height + MESSAGE_SPACING / 2.0;
+    y_cursor = top_box_y + actor_box_height + MESSAGE_SPACING;
 
     // Walk statements and place messages/notes
     let mut messages = Vec::new();
