@@ -181,7 +181,7 @@ pub fn resolve_actors(doc: &Document) -> Vec<(String, String)> {
             };
             if seen.insert(ref_name.clone()) {
                 // Also mark the other name as seen so it won't create a duplicate
-                if let Some(a) = alias {
+                if alias.is_some() {
                     seen.insert(actor.clone());
                 }
                 actors.push((ref_name, display));

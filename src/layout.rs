@@ -174,7 +174,7 @@ pub fn layout_diagram(
     let mut y_cursor = padding;
 
     // Title
-    let title_layout = {
+    let mut title_layout = {
         let mut title = None;
         for stmt in &doc.statements {
             if let Statement::Title(text) = stmt {
@@ -377,7 +377,7 @@ pub fn layout_diagram(
     }
 
     // Lifelines
-    let lifelines: Vec<LifelineLayout> = actor_layouts
+    let mut lifelines: Vec<LifelineLayout> = actor_layouts
         .iter()
         .map(|al| LifelineLayout {
             x: al.center_x,
@@ -386,21 +386,67 @@ pub fn layout_diagram(
         })
         .collect();
 
+    // --- Bounds check: find leftmost and rightmost extents of all elements ---
+
+    // Compute the leftmost x of any element (notes, message labels)
+    let min_left = notes
+        .iter()
+        .map(|n| n.rect.x)
+        .chain(messages.iter().map(|m| {
+            if m.is_self {
+                m.label.x
+            } else {
+                let half_w = font.text_width(&m.label.text, m.label.font_size_px) / 2.0;
+                m.label.x - half_w
+            }
+        }))
+        .fold(f32::MAX, f32::min);
+
+    // If anything extends left of the padding boundary, shift everything right
+    let shift = if min_left < padding {
+        padding - min_left
+    } else {
+        0.0
+    };
+
+    if shift > 0.0 {
+        // Shift all x positions
+        if let Some(ref mut t) = title_layout {
+            t.x += shift;
+        }
+        for al in actor_layouts.iter_mut() {
+            al.center_x += shift;
+            al.top_box.x += shift;
+            al.bottom_box.x += shift;
+            al.top_label.x += shift;
+            al.bottom_label.x += shift;
+        }
+        for m in messages.iter_mut() {
+            m.from_x += shift;
+            m.to_x += shift;
+            m.label.x += shift;
+        }
+        for n in notes.iter_mut() {
+            n.rect.x += shift;
+            n.text.x += shift;
+        }
+        for ll in lifelines.iter_mut() {
+            ll.x += shift;
+        }
+    }
+
     // Final dimensions
-    let base_width = *centers.last().unwrap() + actor_box_widths.last().unwrap() / 2.0 + padding;
+    let base_width = *centers.last().unwrap() + actor_box_widths.last().unwrap() / 2.0 + padding + shift;
     let total_height = bottom_box_y + actor_box_height + padding;
 
-    // Ensure nothing bleeds past the right edge: check notes, self-message labels,
-    // and normal message labels.
+    // Ensure nothing bleeds past the right edge
     let max_right = notes
         .iter()
         .map(|n| n.rect.x + n.rect.width)
         .chain(messages.iter().map(|m| {
             if m.is_self {
-                // Self-message label starts at label.x and extends by text width
                 m.label.x + font.text_width(&m.label.text, m.label.font_size_px)
             } else {
-                // Centered label: midpoint + half the text width
                 let half_w = font.text_width(&m.label.text, m.label.font_size_px) / 2.0;
                 m.label.x + half_w
             }
