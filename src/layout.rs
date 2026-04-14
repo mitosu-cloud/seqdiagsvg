@@ -117,12 +117,14 @@ pub fn layout_diagram(
         .map(|w| w + 2.0 * ACTOR_BOX_PAD_X)
         .collect();
 
-    // Build actor name -> index mapping
-    let actor_index: std::collections::HashMap<&str, usize> = actors_list
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _))| (name.as_str(), i))
-        .collect();
+    // Build actor name -> index mapping (both reference name and display name)
+    let mut actor_index: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (i, (ref_name, display_name)) in actors_list.iter().enumerate() {
+        actor_index.insert(ref_name.as_str(), i);
+        if ref_name != display_name {
+            actor_index.insert(display_name.as_str(), i);
+        }
+    }
 
     // Compute per-gap minimum widths based on message labels between adjacent columns
     let num_gaps = if actors_list.len() > 1 {

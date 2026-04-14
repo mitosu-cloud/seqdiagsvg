@@ -5,6 +5,10 @@ edition = "2021"
 description = "Pure-Rust sequence diagram to SVG/PNG renderer"
 license = "Apache-2.0"
 
+[features]
+default = ["unicode-fonts"]
+unicode-fonts = []
+
 [dependencies]
 pest = "2.7"
 pest_derive = "2.7"

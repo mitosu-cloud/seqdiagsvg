@@ -15,12 +15,14 @@ fn print_usage() {
     eprintln!("  --fg <RRGGBB[AA]>    Foreground color as hex (default: 333333ff)");
     eprintln!("  --bg <RRGGBB[AA]>    Background color as hex (default: ffffffff)");
     eprintln!("  --padding <PX>       Padding in pixels (default: 16)");
+    eprintln!("  --font <PATH>        Additional font file (OTF/TTF) for extra glyph coverage");
     eprintln!("  -h, --help           Print this help");
     eprintln!();
     eprintln!("Examples:");
     eprintln!(r#"  seqdiagsvg diagram.txt diagram.svg"#);
     eprintln!(r#"  echo "Alice->Bob: Hello" | seqdiagsvg - output.png"#);
     eprintln!(r#"  seqdiagsvg --fg 0066cc --font-size 16 input.txt output.svg"#);
+    eprintln!(r#"  seqdiagsvg --font /path/to/NotoSansCJK.ttf input.txt output.png"#);
 }
 
 fn parse_hex_color(s: &str) -> Result<[u8; 4], String> {
@@ -85,6 +87,10 @@ fn main() {
                 opts.padding = args[i]
                     .parse()
                     .unwrap_or_else(|_| { eprintln!("invalid padding"); process::exit(1) });
+            }
+            "--font" => {
+                i += 1;
+                opts.system_font = Some(args[i].clone());
             }
             arg if arg.starts_with('-') && arg != "-" => {
                 eprintln!("unknown option: {arg}");

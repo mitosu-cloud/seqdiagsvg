@@ -20,6 +20,9 @@ pub struct RenderOptions {
     pub bg_color: [u8; 4],
     /// Padding in pixels around the diagram
     pub padding: u32,
+    /// Optional path to an additional system font (OTF/TTF).
+    /// Tried after the primary font (Inter) but before the embedded fallback.
+    pub system_font: Option<String>,
 }
 
 impl Default for RenderOptions {
@@ -30,7 +33,15 @@ impl Default for RenderOptions {
             fg_color: [0x33, 0x33, 0x33, 0xFF],
             bg_color: [0xFF, 0xFF, 0xFF, 0xFF],
             padding: 16,
+            system_font: None,
         }
+    }
+}
+
+fn load_font(opts: &RenderOptions) -> Result<font::DiagramFont, SeqDiagramError> {
+    match &opts.system_font {
+        Some(path) => font::DiagramFont::load_with_system_font(path),
+        None => font::DiagramFont::load(),
     }
 }
 
@@ -53,7 +64,7 @@ pub fn render_to_svg(input: &str, options: Option<RenderOptions>) -> Result<Stri
     let font_size_px = opts.font_size_pt * opts.scale;
 
     let doc = parse::parse_document(input)?;
-    let diagram_font = font::DiagramFont::load()?;
+    let diagram_font = load_font(&opts)?;
     let layout = layout::layout_diagram(&diagram_font, &doc, font_size_px, opts.padding as f32)?;
 
     Ok(svg_render::render_to_svg_string(
@@ -83,7 +94,7 @@ pub fn render_to_pixmap(
     let font_size_px = opts.font_size_pt * opts.scale;
 
     let doc = parse::parse_document(input)?;
-    let diagram_font = font::DiagramFont::load()?;
+    let diagram_font = load_font(&opts)?;
     let layout = layout::layout_diagram(&diagram_font, &doc, font_size_px, opts.padding as f32)?;
 
     let img_width = layout.width.ceil() as u32;

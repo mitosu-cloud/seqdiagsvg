@@ -5,49 +5,83 @@ use skrifa::{FontRef, GlyphId, MetadataProvider};
 use crate::SeqDiagramError;
 
 const PRIMARY_FONT: &[u8] = include_bytes!("../fonts/Inter-Regular.otf");
-const FALLBACK_FONT: &[u8] = include_bytes!("../fonts/WenQuanYiMicroHei-Regular.ttf");
 
-pub struct DiagramFont {
-    primary: &'static [u8],
-    fallback: &'static [u8],
-}
+#[cfg(feature = "unicode-fonts")]
+const FALLBACK_FONT: &[u8] = include_bytes!("../fonts/GoNotoKurrent-Regular.ttf");
 
 /// Which font a glyph was resolved from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FontSource {
     Primary,
     Fallback,
+    System,
+}
+
+pub struct DiagramFont {
+    primary: &'static [u8],
+    #[cfg(feature = "unicode-fonts")]
+    fallback: &'static [u8],
+    /// Optional system font loaded at runtime.
+    system_font: Option<Vec<u8>>,
 }
 
 impl DiagramFont {
     pub fn load() -> Result<Self, SeqDiagramError> {
-        // Validate both fonts load
         FontRef::new(PRIMARY_FONT)
             .map_err(|e| SeqDiagramError::Font(format!("Failed to load primary font: {e}")))?;
+
+        #[cfg(feature = "unicode-fonts")]
         FontRef::new(FALLBACK_FONT)
             .map_err(|e| SeqDiagramError::Font(format!("Failed to load fallback font: {e}")))?;
+
         Ok(Self {
             primary: PRIMARY_FONT,
+            #[cfg(feature = "unicode-fonts")]
             fallback: FALLBACK_FONT,
+            system_font: None,
         })
+    }
+
+    /// Load with an additional system font from a file path.
+    pub fn load_with_system_font(path: &str) -> Result<Self, SeqDiagramError> {
+        let mut font = Self::load()?;
+        let data = std::fs::read(path)
+            .map_err(|e| SeqDiagramError::Font(format!("Failed to read font {path}: {e}")))?;
+        // Validate
+        FontRef::new(&data)
+            .map_err(|e| SeqDiagramError::Font(format!("Invalid font {path}: {e}")))?;
+        font.system_font = Some(data);
+        Ok(font)
     }
 
     pub fn primary_ref(&self) -> FontRef<'_> {
         FontRef::new(self.primary).unwrap()
     }
 
+    #[cfg(feature = "unicode-fonts")]
     pub fn fallback_ref(&self) -> FontRef<'_> {
         FontRef::new(self.fallback).unwrap()
     }
 
-    /// Resolve a character to a glyph ID, trying primary font first then fallback.
+    fn system_ref(&self) -> Option<FontRef<'_>> {
+        self.system_font.as_ref().and_then(|d| FontRef::new(d).ok())
+    }
+
+    /// Resolve a character to a glyph ID, trying primary -> system -> fallback.
     pub fn resolve_glyph(&self, c: char) -> Option<(GlyphId, FontSource)> {
-        let primary = self.primary_ref();
-        if let Some(gid) = primary.charmap().map(c) {
+        // 1. Primary (Inter)
+        if let Some(gid) = self.primary_ref().charmap().map(c) {
             return Some((gid, FontSource::Primary));
         }
-        let fallback = self.fallback_ref();
-        if let Some(gid) = fallback.charmap().map(c) {
+        // 2. System font (if loaded)
+        if let Some(font_ref) = self.system_ref() {
+            if let Some(gid) = font_ref.charmap().map(c) {
+                return Some((gid, FontSource::System));
+            }
+        }
+        // 3. Embedded fallback (GoNotoKurrent)
+        #[cfg(feature = "unicode-fonts")]
+        if let Some(gid) = self.fallback_ref().charmap().map(c) {
             return Some((gid, FontSource::Fallback));
         }
         None
@@ -57,7 +91,11 @@ impl DiagramFont {
     pub fn font_for(&self, source: FontSource) -> FontRef<'_> {
         match source {
             FontSource::Primary => self.primary_ref(),
+            #[cfg(feature = "unicode-fonts")]
             FontSource::Fallback => self.fallback_ref(),
+            FontSource::System => self.system_ref().expect("system font not loaded"),
+            #[cfg(not(feature = "unicode-fonts"))]
+            FontSource::Fallback => panic!("unicode-fonts feature not enabled"),
         }
     }
 
