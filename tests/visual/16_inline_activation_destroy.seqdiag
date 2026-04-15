@@ -1,0 +1,7 @@
+User->+A: DoWork
+A->+B: <<createRequest>>
+B->+C: DoWork
+C-->B: WorkDone
+destroy C
+B-->-A: RequestCreated
+A->User: Done

@@ -1,0 +1,9 @@
+Alice->Bob: Do some work!
+activate Bob
+
+Bob->Bob: Work routine
+activate Bob
+deactivate Bob
+
+Bob->Alice: All done!
+deactivate Bob

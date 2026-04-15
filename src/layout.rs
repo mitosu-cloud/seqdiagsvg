@@ -646,6 +646,9 @@ pub fn layout_diagram(
         .fold(0.0f32, f32::max);
     let total_width = base_width.max(max_right + padding);
 
+    // Reverse frames so outer frames render first (bottom), inner frames on top
+    frames.reverse();
+
     Ok(DiagramLayout {
         width: total_width,
         height: total_height,

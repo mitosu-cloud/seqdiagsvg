@@ -253,46 +253,7 @@ pub fn render_diagram(
         );
     }
 
-    // Actor boxes
-    for a in &layout.actors {
-        // Top box
-        fill_rect(pixmap, &a.top_box, actor_fill, transform);
-        stroke_rect(pixmap, &a.top_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
-        render_text(font, pixmap, &a.top_label, actor_text, transform);
-        // Bottom box
-        fill_rect(pixmap, &a.bottom_box, actor_fill, transform);
-        stroke_rect(pixmap, &a.bottom_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
-        render_text(font, pixmap, &a.bottom_label, actor_text, transform);
-    }
-
-    // Messages
-    let msg_dash = [style.message_dash[0], style.message_dash[1]];
-    for m in &layout.messages {
-        let dash: Option<&[f32]> = match m.arrow.line_style {
-            LineStyle::Solid => None,
-            LineStyle::Dashed => Some(&msg_dash),
-        };
-
-        if m.is_self {
-            let x = m.from_x;
-            let jog_x = x + 40.0;
-            let y1 = m.from_y;
-            let y2 = m.from_y + 30.0;
-            draw_line(pixmap, x, y1, jog_x, y1, fg, style.arrow_stroke_width, dash, transform);
-            draw_line(pixmap, jog_x, y1, jog_x, y2, fg, style.arrow_stroke_width, dash, transform);
-            draw_line(pixmap, jog_x, y2, x, y2, fg, style.arrow_stroke_width, dash, transform);
-            draw_arrowhead(pixmap, x, y2, false, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
-        } else {
-            let pointing_right = m.to_x > m.from_x;
-            draw_line(pixmap, m.from_x, m.from_y, m.to_x, m.to_y, fg, style.arrow_stroke_width, dash, transform);
-            draw_arrowhead(pixmap, m.to_x, m.to_y, pointing_right, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
-        }
-
-        // Message label
-        render_text(font, pixmap, &m.label, fg, transform);
-    }
-
-    // Frames
+    // Frames (behind messages/notes, in front of lifelines)
     let frame_fill_color = opts.frame_fill;
     let frame_else_dash = [style.frame_else_dash[0], style.frame_else_dash[1]];
     for f in &layout.frames {
@@ -338,6 +299,45 @@ pub fn render_diagram(
     for ab in &layout.activation_boxes {
         fill_rect(pixmap, &ab.rect, activation_fill, transform);
         stroke_rect(pixmap, &ab.rect, fg, style.activation_stroke_width, 0.0, transform);
+    }
+
+    // Actor boxes
+    for a in &layout.actors {
+        // Top box
+        fill_rect(pixmap, &a.top_box, actor_fill, transform);
+        stroke_rect(pixmap, &a.top_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
+        render_text(font, pixmap, &a.top_label, actor_text, transform);
+        // Bottom box
+        fill_rect(pixmap, &a.bottom_box, actor_fill, transform);
+        stroke_rect(pixmap, &a.bottom_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
+        render_text(font, pixmap, &a.bottom_label, actor_text, transform);
+    }
+
+    // Messages
+    let msg_dash = [style.message_dash[0], style.message_dash[1]];
+    for m in &layout.messages {
+        let dash: Option<&[f32]> = match m.arrow.line_style {
+            LineStyle::Solid => None,
+            LineStyle::Dashed => Some(&msg_dash),
+        };
+
+        if m.is_self {
+            let x = m.from_x;
+            let jog_x = x + 40.0;
+            let y1 = m.from_y;
+            let y2 = m.from_y + 30.0;
+            draw_line(pixmap, x, y1, jog_x, y1, fg, style.arrow_stroke_width, dash, transform);
+            draw_line(pixmap, jog_x, y1, jog_x, y2, fg, style.arrow_stroke_width, dash, transform);
+            draw_line(pixmap, jog_x, y2, x, y2, fg, style.arrow_stroke_width, dash, transform);
+            draw_arrowhead(pixmap, x, y2, false, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
+        } else {
+            let pointing_right = m.to_x > m.from_x;
+            draw_line(pixmap, m.from_x, m.from_y, m.to_x, m.to_y, fg, style.arrow_stroke_width, dash, transform);
+            draw_arrowhead(pixmap, m.to_x, m.to_y, pointing_right, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
+        }
+
+        // Message label
+        render_text(font, pixmap, &m.label, fg, transform);
     }
 
     // Notes

@@ -1,0 +1,11 @@
+A->B: First
+activate A
+activate B
+
+B->C: Second
+deactivate A
+deactivate B
+activate C
+
+C->C: Self
+deactivate C

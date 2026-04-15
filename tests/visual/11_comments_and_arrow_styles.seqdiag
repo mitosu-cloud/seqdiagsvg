@@ -1,0 +1,8 @@
+# This is a comment and won't appear in the diagram.
+
+Alice->Bob: Filled arrow
+Alice->>Bob: Open arrow
+Bob-->Alice: Dotted line
+Bob-->>Alice: Dotted line, open arrow
+Alice->(1)Bob: Slightly delayed
+Bob->(5)Alice: Highly delayed
