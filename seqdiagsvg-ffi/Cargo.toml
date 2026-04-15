@@ -1,0 +1,22 @@
+[package]
+name = "seqdiagsvg-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "UniFFI bindings for seqdiagsvg — Swift access to sequence diagram rendering"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+name = "seqdiagsvg_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/uniffi-bindgen.rs"
+
+[dependencies]
+seqdiagsvg = { path = ".." }
+uniffi = { version = "0.28", features = ["cli"] }
+thiserror = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"

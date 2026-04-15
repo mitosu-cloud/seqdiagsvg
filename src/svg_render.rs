@@ -107,35 +107,41 @@ fn collect_text_glyphs(
     }
 }
 
-/// Render positioned text as a series of <use> references.
+/// Render positioned text as a series of <use> references, with multi-line support.
 fn render_text_uses(
     out: &mut String,
     font: &DiagramFont,
     pt: &PositionedText,
     defs: &HashMap<GlyphKey, String>,
 ) {
-    let total_width = font.text_width(&pt.text, pt.font_size_px);
-    let start_x = match pt.anchor {
-        TextAnchor::Middle => pt.x - total_width / 2.0,
-        TextAnchor::Start => pt.x,
-    };
+    let metrics = font.metrics(pt.font_size_px);
+    let line_height = metrics.ascent - metrics.descent;
 
-    let mut cx = start_x;
-    for c in pt.text.chars() {
-        if let Some((gid, source)) = font.resolve_glyph(c) {
-            let key = (gid.to_u32() as u16, pt.font_size_px.to_bits(), source);
-            if let Some(def_id) = defs.get(&key) {
-                write!(
-                    out,
-                    "<use href=\"#{}\" transform=\"matrix(1 0 0 -1 {} {})\"/>",
-                    def_id,
-                    fmt(cx),
-                    fmt(pt.y)
-                )
-                .unwrap();
+    for (line_idx, line) in pt.text.split('\n').enumerate() {
+        let line_width = font.text_width(line, pt.font_size_px);
+        let start_x = match pt.anchor {
+            TextAnchor::Middle => pt.x - line_width / 2.0,
+            TextAnchor::Start => pt.x,
+        };
+        let y = pt.y + line_idx as f32 * line_height;
+
+        let mut cx = start_x;
+        for c in line.chars() {
+            if let Some((gid, source)) = font.resolve_glyph(c) {
+                let key = (gid.to_u32() as u16, pt.font_size_px.to_bits(), source);
+                if let Some(def_id) = defs.get(&key) {
+                    write!(
+                        out,
+                        "<use href=\"#{}\" transform=\"matrix(1 0 0 -1 {} {})\"/>",
+                        def_id,
+                        fmt(cx),
+                        fmt(y)
+                    )
+                    .unwrap();
+                }
+                let gm = font.glyph_metrics_for(pt.font_size_px, source);
+                cx += gm.advance_width(gid).unwrap_or(0.0);
             }
-            let gm = font.glyph_metrics_for(pt.font_size_px, source);
-            cx += gm.advance_width(gid).unwrap_or(0.0);
         }
     }
 }
@@ -147,6 +153,7 @@ pub fn render_to_svg_string(
 ) -> String {
     let fg = color_to_svg(opts.fg_color);
     let bg = color_to_svg(opts.bg_color);
+    let style = &opts.style;
 
     // Collect all text elements
     let mut all_texts: Vec<&PositionedText> = Vec::new();
@@ -182,15 +189,26 @@ pub fn render_to_svg_string(
         }
     }
 
-    // SVG header
+    // SVG header — viewBox is always the natural size; width/height may be clamped
+    let natural_w = layout.width;
+    let natural_h = layout.height;
+    let scale_factor = match (opts.max_width, opts.max_height) {
+        (Some(mw), Some(mh)) => (mw / natural_w).min(mh / natural_h).min(1.0),
+        (Some(mw), None) => (mw / natural_w).min(1.0),
+        (None, Some(mh)) => (mh / natural_h).min(1.0),
+        (None, None) => 1.0,
+    };
+    let display_w = natural_w * scale_factor;
+    let display_h = natural_h * scale_factor;
+
     let mut svg = String::new();
     write!(
         svg,
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" width="{}" height="{}">"#,
-        fmt(layout.width),
-        fmt(layout.height),
-        fmt(layout.width),
-        fmt(layout.height)
+        fmt(natural_w),
+        fmt(natural_h),
+        fmt(display_w),
+        fmt(display_h)
     )
     .unwrap();
 
@@ -201,8 +219,8 @@ pub fn render_to_svg_string(
     // Open arrowhead marker (two lines forming a V)
     write!(
         svg,
-        r#"<marker id="arrow-open" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10" fill="none" stroke="{}" stroke-width="1.5"/></marker>"#,
-        fg
+        r#"<marker id="arrow-open" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10" fill="none" stroke="{}" stroke-width="{}"/></marker>"#,
+        fg, fmt(style.arrow_stroke_width)
     )
     .unwrap();
 
@@ -238,20 +256,23 @@ pub fn render_to_svg_string(
     for ll in &layout.lifelines {
         write!(
             svg,
-            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke-dasharray="6,4" stroke-width="1" fill="none"/>"#,
+            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke-dasharray="{},{}" stroke-width="{}" fill="none"/>"#,
             fmt(ll.x),
             fmt(ll.y_start),
             fmt(ll.x),
-            fmt(ll.y_end)
+            fmt(ll.y_end),
+            fmt(style.lifeline_dash[0]),
+            fmt(style.lifeline_dash[1]),
+            fmt(style.lifeline_stroke_width)
         )
         .unwrap();
     }
 
     // Actor boxes
     for a in &layout.actors {
-        render_box(&mut svg, &a.top_box, &fg);
+        render_box(&mut svg, &a.top_box, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
         render_text_uses(&mut svg, font, &a.top_label, &defs_map);
-        render_box(&mut svg, &a.bottom_box, &fg);
+        render_box(&mut svg, &a.bottom_box, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
         render_text_uses(&mut svg, font, &a.bottom_label, &defs_map);
     }
 
@@ -262,8 +283,8 @@ pub fn render_to_svg_string(
             HeadStyle::Closed => "url(#arrow-closed)",
         };
         let dash = match m.arrow.line_style {
-            LineStyle::Solid => "",
-            LineStyle::Dashed => r#" stroke-dasharray="8,4""#,
+            LineStyle::Solid => String::new(),
+            LineStyle::Dashed => format!(r#" stroke-dasharray="{},{}""#, fmt(style.message_dash[0]), fmt(style.message_dash[1])),
         };
 
         if m.is_self {
@@ -273,22 +294,23 @@ pub fn render_to_svg_string(
             let y2 = m.y + 30.0;
             write!(
                 svg,
-                r#"<path d="M{} {} L{} {} L{} {} L{} {}" fill="none" stroke-width="1.5"{} marker-end="{}"/>"#,
+                r#"<path d="M{} {} L{} {} L{} {} L{} {}" fill="none" stroke-width="{}"{} marker-end="{}"/>"#,
                 fmt(x), fmt(y1),
                 fmt(jog_x), fmt(y1),
                 fmt(jog_x), fmt(y2),
                 fmt(x), fmt(y2),
-                dash, marker
+                fmt(style.arrow_stroke_width), dash, marker
             )
             .unwrap();
         } else {
             write!(
                 svg,
-                r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke-width="1.5" fill="none"{} marker-end="{}"/>"#,
+                r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke-width="{}" fill="none"{} marker-end="{}"/>"#,
                 fmt(m.from_x),
                 fmt(m.y),
                 fmt(m.to_x),
                 fmt(m.y),
+                fmt(style.arrow_stroke_width),
                 dash,
                 marker
             )
@@ -299,17 +321,19 @@ pub fn render_to_svg_string(
     }
 
     // Notes
+    let note_bg = color_to_svg(opts.note_color);
     for n in &layout.notes {
-        let note_bg = "#ffffcc";
         write!(
             svg,
-            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1\" rx=\"2\"/>",
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\" rx=\"{}\"/>",
             fmt(n.rect.x),
             fmt(n.rect.y),
             fmt(n.rect.width),
             fmt(n.rect.height),
             note_bg,
-            fg
+            fg,
+            fmt(style.note_stroke_width),
+            fmt(style.note_corner_radius)
         )
         .unwrap();
         render_text_uses(&mut svg, font, &n.text, &defs_map);
@@ -319,15 +343,17 @@ pub fn render_to_svg_string(
     svg
 }
 
-fn render_box(out: &mut String, rect: &Rect, stroke_color: &str) {
+fn render_box(out: &mut String, rect: &Rect, stroke_color: &str, stroke_width: f32, corner_radius: f32) {
     write!(
         out,
-        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="white" stroke="{}" stroke-width="1.5" rx="3"/>"#,
+        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="white" stroke="{}" stroke-width="{}" rx="{}"/>"#,
         fmt(rect.x),
         fmt(rect.y),
         fmt(rect.width),
         fmt(rect.height),
-        stroke_color
+        stroke_color,
+        fmt(stroke_width),
+        fmt(corner_radius)
     )
     .unwrap();
 }

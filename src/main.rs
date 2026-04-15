@@ -14,8 +14,16 @@ fn print_usage() {
     eprintln!("  --scale <FACTOR>     Scale factor (default: 2.0)");
     eprintln!("  --fg <RRGGBB[AA]>    Foreground color as hex (default: 333333ff)");
     eprintln!("  --bg <RRGGBB[AA]>    Background color as hex (default: ffffffff)");
+    eprintln!("  --note-color <HEX>   Note background color as hex (default: ffffcc)");
     eprintln!("  --padding <PX>       Padding in pixels (default: 16)");
     eprintln!("  --font <PATH>        Additional font file (OTF/TTF) for extra glyph coverage");
+    eprintln!("  --max-width <PX>     Maximum diagram width (scales down uniformly if exceeded)");
+    eprintln!("  --max-height <PX>    Maximum diagram height (scales down uniformly if exceeded)");
+    eprintln!("  --arrow-stroke <W>   Arrow line stroke width (default: 1.5)");
+    eprintln!("  --note-stroke <W>    Note outline stroke width (default: 1.0)");
+    eprintln!("  --note-radius <R>    Note corner radius (default: 2.0)");
+    eprintln!("  --actor-stroke <W>   Actor box stroke width (default: 1.5)");
+    eprintln!("  --actor-radius <R>   Actor box corner radius (default: 3.0)");
     eprintln!("  -h, --help           Print this help");
     eprintln!();
     eprintln!("Examples:");
@@ -91,6 +99,55 @@ fn main() {
             "--font" => {
                 i += 1;
                 opts.system_font = Some(args[i].clone());
+            }
+            "--note-color" => {
+                i += 1;
+                opts.note_color = parse_hex_color(&args[i])
+                    .unwrap_or_else(|e| { eprintln!("{e}"); process::exit(1) });
+            }
+            "--max-width" => {
+                i += 1;
+                let v: f32 = args[i]
+                    .parse()
+                    .unwrap_or_else(|_| { eprintln!("invalid max-width"); process::exit(1) });
+                opts.max_width = Some(v);
+            }
+            "--max-height" => {
+                i += 1;
+                let v: f32 = args[i]
+                    .parse()
+                    .unwrap_or_else(|_| { eprintln!("invalid max-height"); process::exit(1) });
+                opts.max_height = Some(v);
+            }
+            "--arrow-stroke" => {
+                i += 1;
+                opts.style.arrow_stroke_width = args[i]
+                    .parse()
+                    .unwrap_or_else(|_| { eprintln!("invalid arrow-stroke"); process::exit(1) });
+            }
+            "--note-stroke" => {
+                i += 1;
+                opts.style.note_stroke_width = args[i]
+                    .parse()
+                    .unwrap_or_else(|_| { eprintln!("invalid note-stroke"); process::exit(1) });
+            }
+            "--note-radius" => {
+                i += 1;
+                opts.style.note_corner_radius = args[i]
+                    .parse()
+                    .unwrap_or_else(|_| { eprintln!("invalid note-radius"); process::exit(1) });
+            }
+            "--actor-stroke" => {
+                i += 1;
+                opts.style.actor_box_stroke_width = args[i]
+                    .parse()
+                    .unwrap_or_else(|_| { eprintln!("invalid actor-stroke"); process::exit(1) });
+            }
+            "--actor-radius" => {
+                i += 1;
+                opts.style.actor_box_corner_radius = args[i]
+                    .parse()
+                    .unwrap_or_else(|_| { eprintln!("invalid actor-radius"); process::exit(1) });
             }
             arg if arg.starts_with('-') && arg != "-" => {
                 eprintln!("unknown option: {arg}");

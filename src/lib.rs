@@ -8,6 +8,41 @@ mod svg_render;
 pub use ast::{Arrow, Document, HeadStyle, LineStyle, NotePosition, Statement};
 pub use parse::{parse_document, resolve_actors};
 
+/// Style configuration for stroke widths, corner radii, and dash patterns.
+pub struct StyleConfig {
+    /// Stroke width for message arrows (default: 1.5)
+    pub arrow_stroke_width: f32,
+    /// Stroke width for actor box outlines (default: 1.5)
+    pub actor_box_stroke_width: f32,
+    /// Stroke width for lifelines (default: 1.0)
+    pub lifeline_stroke_width: f32,
+    /// Stroke width for note outlines (default: 1.0)
+    pub note_stroke_width: f32,
+    /// Corner radius for actor boxes (default: 3.0)
+    pub actor_box_corner_radius: f32,
+    /// Corner radius for note boxes (default: 2.0)
+    pub note_corner_radius: f32,
+    /// Dash pattern for lifelines [dash, gap] (default: [6.0, 4.0])
+    pub lifeline_dash: [f32; 2],
+    /// Dash pattern for dashed messages [dash, gap] (default: [8.0, 4.0])
+    pub message_dash: [f32; 2],
+}
+
+impl Default for StyleConfig {
+    fn default() -> Self {
+        Self {
+            arrow_stroke_width: 1.5,
+            actor_box_stroke_width: 1.5,
+            lifeline_stroke_width: 1.0,
+            note_stroke_width: 1.0,
+            actor_box_corner_radius: 3.0,
+            note_corner_radius: 2.0,
+            lifeline_dash: [6.0, 4.0],
+            message_dash: [8.0, 4.0],
+        }
+    }
+}
+
 /// Render options for sequence diagrams.
 pub struct RenderOptions {
     /// Font size in points (default: 14.0)
@@ -18,11 +53,19 @@ pub struct RenderOptions {
     pub fg_color: [u8; 4],
     /// RGBA background color (default: white [0xFF, 0xFF, 0xFF, 0xFF])
     pub bg_color: [u8; 4],
+    /// RGBA note background color (default: yellow [0xFF, 0xFF, 0xCC, 0xFF])
+    pub note_color: [u8; 4],
     /// Padding in pixels around the diagram
     pub padding: u32,
     /// Optional path to an additional system font (OTF/TTF).
     /// Tried after the primary font (Inter) but before the embedded fallback.
     pub system_font: Option<String>,
+    /// Style configuration for strokes, radii, and dash patterns.
+    pub style: StyleConfig,
+    /// Maximum width in pixels. If the diagram exceeds this, it scales down uniformly.
+    pub max_width: Option<f32>,
+    /// Maximum height in pixels. If the diagram exceeds this, it scales down uniformly.
+    pub max_height: Option<f32>,
 }
 
 impl Default for RenderOptions {
@@ -32,8 +75,12 @@ impl Default for RenderOptions {
             scale: 2.0,
             fg_color: [0x33, 0x33, 0x33, 0xFF],
             bg_color: [0xFF, 0xFF, 0xFF, 0xFF],
+            note_color: [0xFF, 0xFF, 0xCC, 0xFF],
             padding: 16,
             system_font: None,
+            style: StyleConfig::default(),
+            max_width: None,
+            max_height: None,
         }
     }
 }
@@ -97,8 +144,23 @@ pub fn render_to_pixmap(
     let diagram_font = load_font(&opts)?;
     let layout = layout::layout_diagram(&diagram_font, &doc, font_size_px, opts.padding as f32)?;
 
-    let img_width = layout.width.ceil() as u32;
-    let img_height = layout.height.ceil() as u32;
+    let natural_w = layout.width;
+    let natural_h = layout.height;
+
+    // Compute uniform scale factor for max constraints
+    let scale_factor = match (opts.max_width, opts.max_height) {
+        (Some(mw), Some(mh)) => {
+            let sw = mw / natural_w;
+            let sh = mh / natural_h;
+            sw.min(sh).min(1.0) // never scale up
+        }
+        (Some(mw), None) => (mw / natural_w).min(1.0),
+        (None, Some(mh)) => (mh / natural_h).min(1.0),
+        (None, None) => 1.0,
+    };
+
+    let img_width = (natural_w * scale_factor).ceil() as u32;
+    let img_height = (natural_h * scale_factor).ceil() as u32;
     let img_width = img_width.max(1);
     let img_height = img_height.max(1);
 
@@ -113,7 +175,13 @@ pub fn render_to_pixmap(
     );
     pixmap.fill(bg);
 
-    png_render::render_diagram(&diagram_font, &mut pixmap, &layout, opts.fg_color);
+    let transform = if scale_factor < 1.0 {
+        tiny_skia::Transform::from_scale(scale_factor, scale_factor)
+    } else {
+        tiny_skia::Transform::identity()
+    };
+
+    png_render::render_diagram(&diagram_font, &mut pixmap, &layout, &opts, transform);
 
     Ok(pixmap)
 }

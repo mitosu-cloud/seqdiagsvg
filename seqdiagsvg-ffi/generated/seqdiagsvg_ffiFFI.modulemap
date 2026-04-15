@@ -1,0 +1,4 @@
+module seqdiagsvg_ffiFFI {
+    header "seqdiagsvg_ffiFFI.h"
+    export *
+}

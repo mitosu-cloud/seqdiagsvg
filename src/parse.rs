@@ -8,6 +8,11 @@ use crate::SeqDiagramError;
 #[grammar = "grammar.pest"]
 struct SeqDiagramParser;
 
+/// Unescape `\n` sequences in text to actual newlines.
+fn unescape_text(s: &str) -> String {
+    s.replace("\\n", "\n")
+}
+
 /// Parse a sequence diagram input string into a Document AST.
 pub fn parse_document(input: &str) -> Result<Document, SeqDiagramError> {
     let pairs = SeqDiagramParser::parse(Rule::document, input)
@@ -24,7 +29,7 @@ pub fn parse_document(input: &str) -> Result<Document, SeqDiagramError> {
                 let text = pair
                     .into_inner()
                     .find(|p| p.as_rule() == Rule::message_text)
-                    .map(|p| p.as_str().trim().to_string())
+                    .map(|p| unescape_text(p.as_str().trim()))
                     .unwrap_or_default();
                 statements.push(Statement::Title(text));
             }
@@ -54,7 +59,7 @@ pub fn parse_document(input: &str) -> Result<Document, SeqDiagramError> {
                 let position = parse_note_position(pos_pair);
                 let text = inner
                     .find(|p| p.as_rule() == Rule::message_text)
-                    .map(|p| p.as_str().trim().to_string())
+                    .map(|p| unescape_text(p.as_str().trim()))
                     .unwrap_or_default();
                 statements.push(Statement::Note { position, text });
             }
@@ -76,7 +81,7 @@ pub fn parse_document(input: &str) -> Result<Document, SeqDiagramError> {
                     .to_string();
                 let text = inner
                     .find(|p| p.as_rule() == Rule::message_text)
-                    .map(|p| p.as_str().trim().to_string())
+                    .map(|p| unescape_text(p.as_str().trim()))
                     .unwrap_or_default();
                 statements.push(Statement::Message {
                     from,

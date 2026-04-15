@@ -7,6 +7,7 @@ use tiny_skia::{
 use crate::ast::{HeadStyle, LineStyle};
 use crate::font::DiagramFont;
 use crate::layout::*;
+use crate::RenderOptions;
 
 /// Pen that converts glyph outlines to tiny-skia path commands.
 struct SkiaPen {
@@ -60,55 +61,62 @@ fn make_stroke(width: f32, dash: Option<&[f32]>) -> Stroke {
     stroke
 }
 
-/// Render text at the given position using glyph outlines.
+/// Render text at the given position using glyph outlines, with multi-line support.
 fn render_text(
     font: &DiagramFont,
     pixmap: &mut Pixmap,
     pt: &PositionedText,
     fg: [u8; 4],
+    global_transform: Transform,
 ) {
     let paint = make_paint(fg);
+    let metrics = font.metrics(pt.font_size_px);
+    let line_height = metrics.ascent - metrics.descent;
 
-    let total_width = font.text_width(&pt.text, pt.font_size_px);
-    let start_x = match pt.anchor {
-        TextAnchor::Middle => pt.x - total_width / 2.0,
-        TextAnchor::Start => pt.x,
-    };
+    for (line_idx, line) in pt.text.split('\n').enumerate() {
+        let line_width = font.text_width(line, pt.font_size_px);
+        let start_x = match pt.anchor {
+            TextAnchor::Middle => pt.x - line_width / 2.0,
+            TextAnchor::Start => pt.x,
+        };
+        let y = pt.y + line_idx as f32 * line_height;
 
-    let mut cx = start_x;
+        let mut cx = start_x;
 
-    for c in pt.text.chars() {
-        if let Some((gid, source)) = font.resolve_glyph(c) {
-            let font_ref = font.font_for(source);
-            let outlines = font_ref.outline_glyphs();
-            if let Some(outline) = outlines.get(gid) {
-                let mut pen = SkiaPen::new();
-                let settings = draw_settings(pt.font_size_px);
-                if outline.draw(settings, &mut pen).is_ok() {
-                    if let Some(path) = pen.finish() {
-                        let transform =
-                            Transform::from_row(1.0, 0.0, 0.0, -1.0, cx, pt.y);
-                        pixmap.fill_path(
-                            &path,
-                            &paint,
-                            FillRule::Winding,
-                            transform,
-                            None,
-                        );
+        for c in line.chars() {
+            if let Some((gid, source)) = font.resolve_glyph(c) {
+                let font_ref = font.font_for(source);
+                let outlines = font_ref.outline_glyphs();
+                if let Some(outline) = outlines.get(gid) {
+                    let mut pen = SkiaPen::new();
+                    let settings = draw_settings(pt.font_size_px);
+                    if outline.draw(settings, &mut pen).is_ok() {
+                        if let Some(path) = pen.finish() {
+                            let glyph_transform =
+                                Transform::from_row(1.0, 0.0, 0.0, -1.0, cx, y);
+                            let transform = glyph_transform.post_concat(global_transform);
+                            pixmap.fill_path(
+                                &path,
+                                &paint,
+                                FillRule::Winding,
+                                transform,
+                                None,
+                            );
+                        }
                     }
                 }
+                let gm = font.glyph_metrics_for(pt.font_size_px, source);
+                cx += gm.advance_width(gid).unwrap_or(0.0);
             }
-            let gm = font.glyph_metrics_for(pt.font_size_px, source);
-            cx += gm.advance_width(gid).unwrap_or(0.0);
         }
     }
 }
 
 /// Draw a filled rectangle.
-fn fill_rect(pixmap: &mut Pixmap, rect: &Rect, rgba: [u8; 4]) {
+fn fill_rect(pixmap: &mut Pixmap, rect: &Rect, rgba: [u8; 4], transform: Transform) {
     let paint = make_paint(rgba);
     if let Some(r) = tiny_skia::Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
-        pixmap.fill_rect(r, &paint, Transform::identity(), None);
+        pixmap.fill_rect(r, &paint, transform, None);
     }
 }
 
@@ -119,10 +127,10 @@ fn draw_settings(font_size_px: f32) -> skrifa::outline::DrawSettings<'static> {
 }
 
 /// Draw a stroked rectangle with rounded corners.
-fn stroke_rect(pixmap: &mut Pixmap, rect: &Rect, rgba: [u8; 4], width: f32) {
+fn stroke_rect(pixmap: &mut Pixmap, rect: &Rect, rgba: [u8; 4], width: f32, corner_radius: f32, transform: Transform) {
     let paint = make_paint(rgba);
     let stroke = make_stroke(width, None);
-    let r = 3.0f32; // corner radius
+    let r = corner_radius;
     let mut pb = PathBuilder::new();
     // Rounded rect path
     pb.move_to(rect.x + r, rect.y);
@@ -141,7 +149,7 @@ fn stroke_rect(pixmap: &mut Pixmap, rect: &Rect, rgba: [u8; 4], width: f32) {
     pb.quad_to(rect.x, rect.y, rect.x + r, rect.y);
     pb.close();
     if let Some(path) = pb.finish() {
-        pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+        pixmap.stroke_path(&path, &paint, &stroke, transform, None);
     }
 }
 
@@ -155,6 +163,7 @@ fn draw_line(
     rgba: [u8; 4],
     width: f32,
     dash: Option<&[f32]>,
+    transform: Transform,
 ) {
     let paint = make_paint(rgba);
     let stroke = make_stroke(width, dash);
@@ -162,7 +171,7 @@ fn draw_line(
     pb.move_to(x1, y1);
     pb.line_to(x2, y2);
     if let Some(path) = pb.finish() {
-        pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+        pixmap.stroke_path(&path, &paint, &stroke, transform, None);
     }
 }
 
@@ -174,6 +183,8 @@ fn draw_arrowhead(
     pointing_right: bool,
     head_style: HeadStyle,
     rgba: [u8; 4],
+    arrow_stroke_width: f32,
+    transform: Transform,
 ) {
     let size = 8.0f32;
     let dx = if pointing_right { -size } else { size };
@@ -189,7 +200,7 @@ fn draw_arrowhead(
         let paint = make_paint(rgba);
         match head_style {
             HeadStyle::Closed => {
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
             }
             HeadStyle::Open => {
                 // Draw just the two lines of the V
@@ -198,8 +209,8 @@ fn draw_arrowhead(
                 pb2.line_to(tip_x, tip_y);
                 pb2.line_to(tip_x + dx, tip_y + dy);
                 if let Some(path2) = pb2.finish() {
-                    let stroke = make_stroke(1.5, None);
-                    pixmap.stroke_path(&path2, &paint, &stroke, Transform::identity(), None);
+                    let stroke = make_stroke(arrow_stroke_width, None);
+                    pixmap.stroke_path(&path2, &paint, &stroke, transform, None);
                 }
             }
         }
@@ -211,17 +222,21 @@ pub fn render_diagram(
     font: &DiagramFont,
     pixmap: &mut Pixmap,
     layout: &DiagramLayout,
-    fg: [u8; 4],
+    opts: &RenderOptions,
+    transform: Transform,
 ) {
+    let fg = opts.fg_color;
+    let style = &opts.style;
     let white = [255u8, 255, 255, 255];
-    let note_bg = [255u8, 255, 204, 255]; // #ffffcc
+    let note_bg = opts.note_color;
 
     // Title
     if let Some(ref t) = layout.title {
-        render_text(font, pixmap, t, fg);
+        render_text(font, pixmap, t, fg, transform);
     }
 
     // Lifelines
+    let ll_dash = [style.lifeline_dash[0], style.lifeline_dash[1]];
     for ll in &layout.lifelines {
         draw_line(
             pixmap,
@@ -230,28 +245,30 @@ pub fn render_diagram(
             ll.x,
             ll.y_end,
             fg,
-            1.0,
-            Some(&[6.0, 4.0]),
+            style.lifeline_stroke_width,
+            Some(&ll_dash),
+            transform,
         );
     }
 
     // Actor boxes
     for a in &layout.actors {
         // Top box
-        fill_rect(pixmap, &a.top_box, white);
-        stroke_rect(pixmap, &a.top_box, fg, 1.5);
-        render_text(font, pixmap, &a.top_label, fg);
+        fill_rect(pixmap, &a.top_box, white, transform);
+        stroke_rect(pixmap, &a.top_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
+        render_text(font, pixmap, &a.top_label, fg, transform);
         // Bottom box
-        fill_rect(pixmap, &a.bottom_box, white);
-        stroke_rect(pixmap, &a.bottom_box, fg, 1.5);
-        render_text(font, pixmap, &a.bottom_label, fg);
+        fill_rect(pixmap, &a.bottom_box, white, transform);
+        stroke_rect(pixmap, &a.bottom_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
+        render_text(font, pixmap, &a.bottom_label, fg, transform);
     }
 
     // Messages
+    let msg_dash = [style.message_dash[0], style.message_dash[1]];
     for m in &layout.messages {
         let dash: Option<&[f32]> = match m.arrow.line_style {
             LineStyle::Solid => None,
-            LineStyle::Dashed => Some(&[8.0, 4.0]),
+            LineStyle::Dashed => Some(&msg_dash),
         };
 
         if m.is_self {
@@ -260,25 +277,25 @@ pub fn render_diagram(
             let y1 = m.y;
             let y2 = m.y + 30.0;
             // Draw the three segments of the self-loop
-            draw_line(pixmap, x, y1, jog_x, y1, fg, 1.5, dash);
-            draw_line(pixmap, jog_x, y1, jog_x, y2, fg, 1.5, dash);
-            draw_line(pixmap, jog_x, y2, x, y2, fg, 1.5, dash);
+            draw_line(pixmap, x, y1, jog_x, y1, fg, style.arrow_stroke_width, dash, transform);
+            draw_line(pixmap, jog_x, y1, jog_x, y2, fg, style.arrow_stroke_width, dash, transform);
+            draw_line(pixmap, jog_x, y2, x, y2, fg, style.arrow_stroke_width, dash, transform);
             // Arrowhead pointing left at (x, y2)
-            draw_arrowhead(pixmap, x, y2, false, m.arrow.head_style, fg);
+            draw_arrowhead(pixmap, x, y2, false, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
         } else {
             let pointing_right = m.to_x > m.from_x;
-            draw_line(pixmap, m.from_x, m.y, m.to_x, m.y, fg, 1.5, dash);
-            draw_arrowhead(pixmap, m.to_x, m.y, pointing_right, m.arrow.head_style, fg);
+            draw_line(pixmap, m.from_x, m.y, m.to_x, m.y, fg, style.arrow_stroke_width, dash, transform);
+            draw_arrowhead(pixmap, m.to_x, m.y, pointing_right, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
         }
 
         // Message label
-        render_text(font, pixmap, &m.label, fg);
+        render_text(font, pixmap, &m.label, fg, transform);
     }
 
     // Notes
     for n in &layout.notes {
-        fill_rect(pixmap, &n.rect, note_bg);
-        stroke_rect(pixmap, &n.rect, fg, 1.0);
-        render_text(font, pixmap, &n.text, fg);
+        fill_rect(pixmap, &n.rect, note_bg, transform);
+        stroke_rect(pixmap, &n.rect, fg, style.note_stroke_width, style.note_corner_radius, transform);
+        render_text(font, pixmap, &n.text, fg, transform);
     }
 }

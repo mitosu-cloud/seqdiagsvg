@@ -124,4 +124,11 @@ impl DiagramFont {
             })
             .sum()
     }
+
+    /// Measure the maximum line width for potentially multi-line text.
+    pub fn text_block_width(&self, text: &str, font_size_px: f32) -> f32 {
+        text.split('\n')
+            .map(|line| self.text_width(line, font_size_px))
+            .fold(0.0f32, f32::max)
+    }
 }

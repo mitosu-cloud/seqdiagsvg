@@ -144,7 +144,7 @@ pub fn layout_diagram(
                         Statement::Message { text, .. } => text,
                         _ => unreachable!(),
                     };
-                    let label_w = font.text_width(label_text, font_size_px) + 20.0; // padding
+                    let label_w = font.text_block_width(label_text, font_size_px) + 20.0; // padding
                     // Distribute across gaps between left..right
                     let span = right - left;
                     let per_gap = label_w / span as f32;
@@ -261,7 +261,9 @@ pub fn layout_diagram(
                     let from_x = centers[fi];
                     let to_x = centers[ti];
 
-                    let _label_w = font.text_width(text, font_size_px);
+                    let _label_w = font.text_block_width(text, font_size_px);
+                    let num_lines = text.split('\n').count().max(1);
+                    let extra_lines = (num_lines - 1) as f32;
 
                     if is_self {
                         // Self-message: label to the right of the jog
@@ -280,11 +282,15 @@ pub fn layout_diagram(
                             },
                             is_self: true,
                         });
-                        y_cursor += SELF_MESSAGE_HEIGHT + MESSAGE_SPACING;
+                        let self_height = SELF_MESSAGE_HEIGHT.max((num_lines as f32) * line_height);
+                        y_cursor += self_height + MESSAGE_SPACING;
                     } else {
                         // Normal message: label centered above arrow
+                        // For multi-line, shift label up so bottom line sits above arrow
+                        let extra_height = extra_lines * line_height;
+                        y_cursor += extra_height; // push arrow down to make room
                         let mid_x = (from_x + to_x) / 2.0;
-                        let label_y = y_cursor - descent.abs() - 4.0;
+                        let label_y = y_cursor - descent.abs() - 4.0 - extra_height;
                         messages.push(MessageLayout {
                             from_x,
                             to_x,
@@ -304,8 +310,9 @@ pub fn layout_diagram(
                 }
             }
             Statement::Note { position, text } => {
-                let note_w = font.text_width(text, font_size_px) + 2.0 * NOTE_PAD_X;
-                let note_h = line_height + 2.0 * NOTE_PAD_Y;
+                let note_lines = text.split('\n').count().max(1);
+                let note_w = font.text_block_width(text, font_size_px) + 2.0 * NOTE_PAD_X;
+                let note_h = (line_height * note_lines as f32) + 2.0 * NOTE_PAD_Y;
 
                 let (note_x, final_w) = match position {
                     NotePosition::LeftOf(actor) => {
@@ -398,7 +405,7 @@ pub fn layout_diagram(
             if m.is_self {
                 m.label.x
             } else {
-                let half_w = font.text_width(&m.label.text, m.label.font_size_px) / 2.0;
+                let half_w = font.text_block_width(&m.label.text, m.label.font_size_px) / 2.0;
                 m.label.x - half_w
             }
         }))
@@ -447,9 +454,9 @@ pub fn layout_diagram(
         .map(|n| n.rect.x + n.rect.width)
         .chain(messages.iter().map(|m| {
             if m.is_self {
-                m.label.x + font.text_width(&m.label.text, m.label.font_size_px)
+                m.label.x + font.text_block_width(&m.label.text, m.label.font_size_px)
             } else {
-                let half_w = font.text_width(&m.label.text, m.label.font_size_px) / 2.0;
+                let half_w = font.text_block_width(&m.label.text, m.label.font_size_px) / 2.0;
                 m.label.x + half_w
             }
         }))

@@ -1,4 +1,4 @@
-use seqdiagsvg::{render_to_png, render_to_svg, RenderOptions};
+use seqdiagsvg::{render_to_png, render_to_svg, RenderOptions, StyleConfig};
 
 const SAMPLE_DIAGRAM: &str = "\
 title: Auth Flow
@@ -134,4 +134,121 @@ fn test_png_custom_scale() {
 
     // Higher scale should produce a larger PNG
     assert!(png2.len() > png1.len());
+}
+
+// --- New feature tests ---
+
+#[test]
+fn test_custom_note_color() {
+    let opts = RenderOptions {
+        note_color: [0xCC, 0xEE, 0xFF, 0xFF],
+        ..RenderOptions::default()
+    };
+    let input = "A->B: hi\nnote right of B: Custom color";
+    let svg = render_to_svg(input, Some(opts)).unwrap();
+    assert!(svg.contains("#cceeff"), "SVG should contain custom note color");
+    assert!(!svg.contains("#ffffcc"), "SVG should not contain default yellow");
+}
+
+#[test]
+fn test_custom_style_config() {
+    let opts = RenderOptions {
+        style: StyleConfig {
+            arrow_stroke_width: 3.0,
+            actor_box_corner_radius: 10.0,
+            note_corner_radius: 5.0,
+            ..StyleConfig::default()
+        },
+        ..RenderOptions::default()
+    };
+    let input = "A->B: hi\nnote right of B: Styled";
+    let svg = render_to_svg(input, Some(opts)).unwrap();
+    assert!(svg.contains("stroke-width=\"3\""), "SVG should contain custom arrow stroke width");
+    assert!(svg.contains("rx=\"10\""), "SVG should contain custom actor box corner radius");
+    assert!(svg.contains("rx=\"5\""), "SVG should contain custom note corner radius");
+}
+
+#[test]
+fn test_max_width_svg() {
+    // First render without constraints to get natural size
+    let input = "A->B: hello\nB->C: world\nC->A: done";
+    let svg_natural = render_to_svg(input, None).unwrap();
+
+    // Now render with a small max_width
+    let opts = RenderOptions {
+        max_width: Some(200.0),
+        ..RenderOptions::default()
+    };
+    let svg_constrained = render_to_svg(input, Some(opts)).unwrap();
+
+    // The constrained SVG should have a smaller width attribute but same viewBox
+    assert!(svg_constrained.contains("width=\"200\"") || svg_constrained.contains("width=\"200."),
+        "constrained SVG width should be at or below 200");
+    // viewBox should still be the natural (larger) size
+    assert_ne!(svg_natural, svg_constrained);
+}
+
+#[test]
+fn test_max_width_png() {
+    let input = "A->B: hello\nB->C: world";
+
+    let png_natural = render_to_png(input, None).unwrap();
+
+    let opts = RenderOptions {
+        max_width: Some(100.0),
+        ..RenderOptions::default()
+    };
+    let png_constrained = render_to_png(input, Some(opts)).unwrap();
+
+    // Constrained PNG should be smaller
+    assert!(png_constrained.len() < png_natural.len(),
+        "constrained PNG should be smaller than natural");
+}
+
+#[test]
+fn test_multiline_note() {
+    let input = r"A->B: hi
+note right of B: Line one\nLine two";
+    let svg = render_to_svg(input, None).unwrap();
+    assert!(svg.starts_with("<svg"));
+    // The note rect should be taller than a single-line note
+    // Just verify it renders without error
+    assert!(svg.contains("<rect"));
+}
+
+#[test]
+fn test_multiline_message() {
+    let input = r"A->B: First line\nSecond line";
+    let svg = render_to_svg(input, None).unwrap();
+    assert!(svg.starts_with("<svg"));
+    assert!(svg.ends_with("</svg>"));
+}
+
+#[test]
+fn test_multiline_note_png() {
+    let input = r"A->B: hi
+note right of B: Line one\nLine two\nLine three";
+    let png = render_to_png(input, None).unwrap();
+    assert_eq!(&png[0..4], &[0x89, 0x50, 0x4E, 0x47]);
+}
+
+#[test]
+fn test_max_constraint_no_upscale() {
+    // Max constraints should never scale UP
+    let input = "A->B: hi";
+    let opts_huge = RenderOptions {
+        max_width: Some(10000.0),
+        max_height: Some(10000.0),
+        ..RenderOptions::default()
+    };
+    let svg_natural = render_to_svg(input, None).unwrap();
+    let svg_huge = render_to_svg(input, Some(opts_huge)).unwrap();
+    // With huge max, width/height attrs should match natural size
+    // (glyph def ordering is non-deterministic, so compare dimensions not full string)
+    let extract_dims = |svg: &str| -> (String, String) {
+        let w = svg.split("width=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        let h = svg.split("height=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        (w, h)
+    };
+    assert_eq!(extract_dims(&svg_natural), extract_dims(&svg_huge));
 }
