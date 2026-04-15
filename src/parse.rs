@@ -20,8 +20,6 @@ pub fn parse_document(input: &str) -> Result<Document, SeqDiagramError> {
 
     let mut statements = Vec::new();
 
-    // The top-level parse result contains a single `document` pair
-    // which in turn contains the actual statement pairs.
     let document_pair = pairs.into_iter().next().unwrap();
     for pair in document_pair.into_inner() {
         match pair.as_rule() {
@@ -40,11 +38,7 @@ pub fn parse_document(input: &str) -> Result<Document, SeqDiagramError> {
                     .expect("participant must have rest")
                     .as_str()
                     .trim();
-                // Split on " as " (case-insensitive) to get actor and optional alias
-                let (actor, alias) = if let Some(pos) = rest
-                    .to_lowercase()
-                    .find(" as ")
-                {
+                let (actor, alias) = if let Some(pos) = rest.to_lowercase().find(" as ") {
                     let actor = rest[..pos].trim().to_string();
                     let alias = rest[pos + 4..].trim().to_string();
                     (actor, Some(alias))
@@ -73,22 +67,97 @@ pub fn parse_document(input: &str) -> Result<Document, SeqDiagramError> {
                     .to_string();
                 let arrow_pair = inner.next().expect("message must have arrow");
                 let arrow = parse_arrow(arrow_pair.as_str());
-                let to = inner
-                    .next()
-                    .expect("message must have to actor")
-                    .as_str()
-                    .trim()
-                    .to_string();
-                let text = inner
-                    .find(|p| p.as_rule() == Rule::message_text)
-                    .map(|p| unescape_text(p.as_str().trim()))
-                    .unwrap_or_default();
+
+                // Scan remaining pairs for optional delay, activation, target actor, and text
+                let mut delay = None;
+                let mut activation = None;
+                let mut to = String::new();
+                let mut text = String::new();
+                for p in inner {
+                    match p.as_rule() {
+                        Rule::delay_factor => {
+                            if let Some(val_pair) = p.into_inner().find(|c| c.as_rule() == Rule::delay_value) {
+                                delay = val_pair.as_str().parse::<u8>().ok();
+                            }
+                        }
+                        Rule::activation_modifier => {
+                            activation = match p.as_str() {
+                                "+" => Some(ActivationModifier::Activate),
+                                "-" => Some(ActivationModifier::Deactivate),
+                                _ => None,
+                            };
+                        }
+                        Rule::actor_name => {
+                            to = p.as_str().trim().to_string();
+                        }
+                        Rule::message_text => {
+                            text = unescape_text(p.as_str().trim());
+                        }
+                        _ => {}
+                    }
+                }
                 statements.push(Statement::Message {
                     from,
                     to,
                     arrow,
                     text,
+                    activation,
+                    delay,
                 });
+            }
+            Rule::activate_stmt => {
+                let actor = pair
+                    .into_inner()
+                    .find(|p| p.as_rule() == Rule::actor_name)
+                    .expect("activate must have actor")
+                    .as_str()
+                    .trim()
+                    .to_string();
+                statements.push(Statement::Activate(actor));
+            }
+            Rule::deactivate_stmt => {
+                let actor = pair
+                    .into_inner()
+                    .find(|p| p.as_rule() == Rule::actor_name)
+                    .expect("deactivate must have actor")
+                    .as_str()
+                    .trim()
+                    .to_string();
+                statements.push(Statement::Deactivate(actor));
+            }
+            Rule::destroy_stmt => {
+                let actor = pair
+                    .into_inner()
+                    .find(|p| p.as_rule() == Rule::actor_name)
+                    .expect("destroy must have actor")
+                    .as_str()
+                    .trim()
+                    .to_string();
+                statements.push(Statement::Destroy(actor));
+            }
+            Rule::frame_open_stmt => {
+                let mut inner = pair.into_inner();
+                let keyword = inner
+                    .next()
+                    .expect("frame must have keyword")
+                    .as_str();
+                let kind = parse_frame_kind(keyword);
+                let label = inner
+                    .find(|p| p.as_rule() == Rule::frame_label)
+                    .map(|p| p.as_str().trim().to_string())
+                    .unwrap_or_default();
+                statements.push(Statement::FrameOpen { kind, label });
+            }
+            Rule::frame_else_stmt => {
+                let label = pair
+                    .into_inner()
+                    .find(|p| p.as_rule() == Rule::frame_label)
+                    .map(|p| p.as_str().trim().to_string())
+                    .unwrap_or_default();
+                statements.push(Statement::FrameElse { label });
+            }
+            Rule::end_stmt => {
+                statements.push(Statement::FrameEnd);
             }
             Rule::EOI => {}
             _ => {}
@@ -164,28 +233,32 @@ fn parse_arrow(s: &str) -> Arrow {
     }
 }
 
+fn parse_frame_kind(s: &str) -> FrameKind {
+    match s.to_lowercase().as_str() {
+        "alt" => FrameKind::Alt,
+        "opt" => FrameKind::Opt,
+        "loop" => FrameKind::Loop,
+        "par" => FrameKind::Par,
+        "critical" => FrameKind::Critical,
+        "break" => FrameKind::Break,
+        _ => FrameKind::Opt,
+    }
+}
+
 /// Extract the ordered list of unique actors from a document.
 /// Returns (reference_name, display_name) pairs.
-///
-/// When `participant Foo as F` is used, "F" is the reference name (used in
-/// messages) and "Foo" is the display label shown in boxes. Participant
-/// declarations come first (in order), then any remaining actors from messages
-/// in order of first appearance.
 pub fn resolve_actors(doc: &Document) -> Vec<(String, String)> {
-    let mut actors: Vec<(String, String)> = Vec::new(); // (reference_name, display_name)
+    let mut actors: Vec<(String, String)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
     // First pass: participant declarations define explicit ordering
     for stmt in &doc.statements {
         if let Statement::Participant { actor, alias } = stmt {
-            // If alias exists: alias is the short reference name, actor is the display label.
-            // If no alias: actor is both the reference name and the display label.
             let (ref_name, display) = match alias {
                 Some(a) => (a.clone(), actor.clone()),
                 None => (actor.clone(), actor.clone()),
             };
             if seen.insert(ref_name.clone()) {
-                // Also mark the other name as seen so it won't create a duplicate
                 if alias.is_some() {
                     seen.insert(actor.clone());
                 }
@@ -194,15 +267,25 @@ pub fn resolve_actors(doc: &Document) -> Vec<(String, String)> {
         }
     }
 
-    // Second pass: remaining actors from messages in order of first appearance
+    // Second pass: remaining actors from messages + activate/deactivate/destroy
     for stmt in &doc.statements {
-        if let Statement::Message { from, to, .. } = stmt {
-            if seen.insert(from.clone()) {
-                actors.push((from.clone(), from.clone()));
+        match stmt {
+            Statement::Message { from, to, .. } => {
+                if seen.insert(from.clone()) {
+                    actors.push((from.clone(), from.clone()));
+                }
+                if seen.insert(to.clone()) {
+                    actors.push((to.clone(), to.clone()));
+                }
             }
-            if seen.insert(to.clone()) {
-                actors.push((to.clone(), to.clone()));
+            Statement::Activate(actor)
+            | Statement::Deactivate(actor)
+            | Statement::Destroy(actor) => {
+                if seen.insert(actor.clone()) {
+                    actors.push((actor.clone(), actor.clone()));
+                }
             }
+            _ => {}
         }
     }
 
@@ -219,16 +302,15 @@ mod tests {
         assert_eq!(doc.statements.len(), 1);
         match &doc.statements[0] {
             Statement::Message {
-                from,
-                to,
-                arrow,
-                text,
+                from, to, arrow, text, activation, delay,
             } => {
                 assert_eq!(from, "Alice");
                 assert_eq!(to, "Bob");
                 assert_eq!(arrow.line_style, LineStyle::Solid);
                 assert_eq!(arrow.head_style, HeadStyle::Open);
                 assert_eq!(text, "Hello");
+                assert!(activation.is_none());
+                assert!(delay.is_none());
             }
             _ => panic!("expected Message"),
         }
@@ -249,34 +331,10 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(
-            arrows[0],
-            Arrow {
-                line_style: LineStyle::Solid,
-                head_style: HeadStyle::Open
-            }
-        );
-        assert_eq!(
-            arrows[1],
-            Arrow {
-                line_style: LineStyle::Solid,
-                head_style: HeadStyle::Closed
-            }
-        );
-        assert_eq!(
-            arrows[2],
-            Arrow {
-                line_style: LineStyle::Dashed,
-                head_style: HeadStyle::Open
-            }
-        );
-        assert_eq!(
-            arrows[3],
-            Arrow {
-                line_style: LineStyle::Dashed,
-                head_style: HeadStyle::Closed
-            }
-        );
+        assert_eq!(arrows[0], Arrow { line_style: LineStyle::Solid, head_style: HeadStyle::Open });
+        assert_eq!(arrows[1], Arrow { line_style: LineStyle::Solid, head_style: HeadStyle::Closed });
+        assert_eq!(arrows[2], Arrow { line_style: LineStyle::Dashed, head_style: HeadStyle::Open });
+        assert_eq!(arrows[3], Arrow { line_style: LineStyle::Dashed, head_style: HeadStyle::Closed });
     }
 
     #[test]
@@ -389,9 +447,9 @@ mod tests {
         let doc = parse_document(input).unwrap();
         let actors = resolve_actors(&doc);
         assert_eq!(actors.len(), 3);
-        assert_eq!(actors[0].0, "Bob"); // participant declared first
-        assert_eq!(actors[1].0, "Alice"); // participant declared second
-        assert_eq!(actors[2].0, "Charlie"); // from messages
+        assert_eq!(actors[0].0, "Bob");
+        assert_eq!(actors[1].0, "Alice");
+        assert_eq!(actors[2].0, "Charlie");
     }
 
     #[test]
@@ -426,10 +484,206 @@ Server-->Client: 200 OK";
         let input = "participant User as U\nparticipant Server as S\nU->S: hello";
         let doc = parse_document(input).unwrap();
         let actors = resolve_actors(&doc);
-        assert_eq!(actors.len(), 2); // no duplicates
-        assert_eq!(actors[0].0, "U"); // reference name is the alias
-        assert_eq!(actors[0].1, "User"); // display name is the full name
+        assert_eq!(actors.len(), 2);
+        assert_eq!(actors[0].0, "U");
+        assert_eq!(actors[0].1, "User");
         assert_eq!(actors[1].0, "S");
         assert_eq!(actors[1].1, "Server");
+    }
+
+    // --- New feature tests ---
+
+    #[test]
+    fn test_activation_modifier_plus() {
+        let doc = parse_document("A->+B: activate").unwrap();
+        match &doc.statements[0] {
+            Statement::Message { from, to, activation, .. } => {
+                assert_eq!(from, "A");
+                assert_eq!(to, "B");
+                assert_eq!(*activation, Some(ActivationModifier::Activate));
+            }
+            _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn test_activation_modifier_minus() {
+        let doc = parse_document("B-->-A: deactivate").unwrap();
+        match &doc.statements[0] {
+            Statement::Message { from, to, activation, arrow, .. } => {
+                assert_eq!(from, "B");
+                assert_eq!(to, "A");
+                assert_eq!(*activation, Some(ActivationModifier::Deactivate));
+                assert_eq!(arrow.line_style, LineStyle::Dashed);
+            }
+            _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn test_standalone_activate() {
+        let doc = parse_document("activate Bob").unwrap();
+        match &doc.statements[0] {
+            Statement::Activate(actor) => assert_eq!(actor, "Bob"),
+            _ => panic!("expected Activate"),
+        }
+    }
+
+    #[test]
+    fn test_standalone_deactivate() {
+        let doc = parse_document("deactivate Bob").unwrap();
+        match &doc.statements[0] {
+            Statement::Deactivate(actor) => assert_eq!(actor, "Bob"),
+            _ => panic!("expected Deactivate"),
+        }
+    }
+
+    #[test]
+    fn test_destroy() {
+        let doc = parse_document("destroy C").unwrap();
+        match &doc.statements[0] {
+            Statement::Destroy(actor) => assert_eq!(actor, "C"),
+            _ => panic!("expected Destroy"),
+        }
+    }
+
+    #[test]
+    fn test_frame_alt() {
+        let doc = parse_document("alt successful case").unwrap();
+        match &doc.statements[0] {
+            Statement::FrameOpen { kind, label } => {
+                assert_eq!(*kind, FrameKind::Alt);
+                assert_eq!(label, "successful case");
+            }
+            _ => panic!("expected FrameOpen"),
+        }
+    }
+
+    #[test]
+    fn test_frame_loop() {
+        let doc = parse_document("loop 1000 times").unwrap();
+        match &doc.statements[0] {
+            Statement::FrameOpen { kind, label } => {
+                assert_eq!(*kind, FrameKind::Loop);
+                assert_eq!(label, "1000 times");
+            }
+            _ => panic!("expected FrameOpen"),
+        }
+    }
+
+    #[test]
+    fn test_frame_opt_no_label() {
+        let doc = parse_document("opt").unwrap();
+        match &doc.statements[0] {
+            Statement::FrameOpen { kind, label } => {
+                assert_eq!(*kind, FrameKind::Opt);
+                assert_eq!(label, "");
+            }
+            _ => panic!("expected FrameOpen"),
+        }
+    }
+
+    #[test]
+    fn test_frame_else() {
+        let doc = parse_document("else some failure").unwrap();
+        match &doc.statements[0] {
+            Statement::FrameElse { label } => {
+                assert_eq!(label, "some failure");
+            }
+            _ => panic!("expected FrameElse"),
+        }
+    }
+
+    #[test]
+    fn test_frame_end() {
+        let doc = parse_document("end").unwrap();
+        assert!(matches!(&doc.statements[0], Statement::FrameEnd));
+    }
+
+    #[test]
+    fn test_frame_end_with_keyword() {
+        let doc = parse_document("end alt").unwrap();
+        assert!(matches!(&doc.statements[0], Statement::FrameEnd));
+    }
+
+    #[test]
+    fn test_slanted_arrow() {
+        let doc = parse_document("A->(3)B: delayed").unwrap();
+        match &doc.statements[0] {
+            Statement::Message { from, to, delay, text, .. } => {
+                assert_eq!(from, "A");
+                assert_eq!(to, "B");
+                assert_eq!(*delay, Some(3));
+                assert_eq!(text, "delayed");
+            }
+            _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn test_slanted_with_activation() {
+        let doc = parse_document("A->(2)+B: both").unwrap();
+        match &doc.statements[0] {
+            Statement::Message { delay, activation, .. } => {
+                assert_eq!(*delay, Some(2));
+                assert_eq!(*activation, Some(ActivationModifier::Activate));
+            }
+            _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn test_full_wsd_example() {
+        let input = "\
+title WebSequenceDiagrams Client
+Caller->+Client: Generate Diagram
+Client->+WebSequenceDiagrams: Create Diagram
+alt no api key and using paid features
+    WebSequenceDiagrams-->Client: 402
+    Client-->Caller: Error
+end alt
+WebSequenceDiagrams-->-Client: 200
+alt has errors
+    Client-->Caller: Invalid
+end alt
+Client->+WebSequenceDiagrams: Get image
+WebSequenceDiagrams-->-Client: Image
+Client-->-Caller: Image";
+        let doc = parse_document(input).unwrap();
+        // Count specific statement types
+        let msgs = doc.statements.iter().filter(|s| matches!(s, Statement::Message { .. })).count();
+        let frames = doc.statements.iter().filter(|s| matches!(s, Statement::FrameOpen { .. })).count();
+        let ends = doc.statements.iter().filter(|s| matches!(s, Statement::FrameEnd)).count();
+        assert_eq!(msgs, 9);
+        assert_eq!(frames, 2);
+        assert_eq!(ends, 2);
+    }
+
+    #[test]
+    fn test_nested_frames() {
+        let input = "\
+alt outer
+    Alice->Bob: hi
+    opt inner
+        Bob->Alice: hey
+    end
+end";
+        let doc = parse_document(input).unwrap();
+        let stmts: Vec<_> = doc.statements.iter().collect();
+        assert!(matches!(stmts[0], Statement::FrameOpen { kind: FrameKind::Alt, .. }));
+        assert!(matches!(stmts[1], Statement::Message { .. }));
+        assert!(matches!(stmts[2], Statement::FrameOpen { kind: FrameKind::Opt, .. }));
+        assert!(matches!(stmts[3], Statement::Message { .. }));
+        assert!(matches!(stmts[4], Statement::FrameEnd));
+        assert!(matches!(stmts[5], Statement::FrameEnd));
+    }
+
+    #[test]
+    fn test_resolve_actors_from_activate() {
+        let input = "Alice->Bob: hi\nactivate Charlie";
+        let doc = parse_document(input).unwrap();
+        let actors = resolve_actors(&doc);
+        assert_eq!(actors.len(), 3);
+        assert_eq!(actors[2].0, "Charlie");
     }
 }

@@ -226,8 +226,10 @@ pub fn render_diagram(
     transform: Transform,
 ) {
     let fg = opts.fg_color;
+    let actor_fill = opts.actor_fill;
+    let actor_text = opts.actor_text_color;
+    let note_text = opts.note_text_color;
     let style = &opts.style;
-    let white = [255u8, 255, 255, 255];
     let note_bg = opts.note_color;
 
     // Title
@@ -254,13 +256,13 @@ pub fn render_diagram(
     // Actor boxes
     for a in &layout.actors {
         // Top box
-        fill_rect(pixmap, &a.top_box, white, transform);
+        fill_rect(pixmap, &a.top_box, actor_fill, transform);
         stroke_rect(pixmap, &a.top_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
-        render_text(font, pixmap, &a.top_label, fg, transform);
+        render_text(font, pixmap, &a.top_label, actor_text, transform);
         // Bottom box
-        fill_rect(pixmap, &a.bottom_box, white, transform);
+        fill_rect(pixmap, &a.bottom_box, actor_fill, transform);
         stroke_rect(pixmap, &a.bottom_box, fg, style.actor_box_stroke_width, style.actor_box_corner_radius, transform);
-        render_text(font, pixmap, &a.bottom_label, fg, transform);
+        render_text(font, pixmap, &a.bottom_label, actor_text, transform);
     }
 
     // Messages
@@ -274,28 +276,81 @@ pub fn render_diagram(
         if m.is_self {
             let x = m.from_x;
             let jog_x = x + 40.0;
-            let y1 = m.y;
-            let y2 = m.y + 30.0;
-            // Draw the three segments of the self-loop
+            let y1 = m.from_y;
+            let y2 = m.from_y + 30.0;
             draw_line(pixmap, x, y1, jog_x, y1, fg, style.arrow_stroke_width, dash, transform);
             draw_line(pixmap, jog_x, y1, jog_x, y2, fg, style.arrow_stroke_width, dash, transform);
             draw_line(pixmap, jog_x, y2, x, y2, fg, style.arrow_stroke_width, dash, transform);
-            // Arrowhead pointing left at (x, y2)
             draw_arrowhead(pixmap, x, y2, false, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
         } else {
             let pointing_right = m.to_x > m.from_x;
-            draw_line(pixmap, m.from_x, m.y, m.to_x, m.y, fg, style.arrow_stroke_width, dash, transform);
-            draw_arrowhead(pixmap, m.to_x, m.y, pointing_right, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
+            draw_line(pixmap, m.from_x, m.from_y, m.to_x, m.to_y, fg, style.arrow_stroke_width, dash, transform);
+            draw_arrowhead(pixmap, m.to_x, m.to_y, pointing_right, m.arrow.head_style, fg, style.arrow_stroke_width, transform);
         }
 
         // Message label
         render_text(font, pixmap, &m.label, fg, transform);
     }
 
+    // Frames
+    let frame_fill_color = opts.frame_fill;
+    let frame_else_dash = [style.frame_else_dash[0], style.frame_else_dash[1]];
+    for f in &layout.frames {
+        fill_rect(pixmap, &f.outer_rect, frame_fill_color, transform);
+        stroke_rect(pixmap, &f.outer_rect, fg, style.frame_stroke_width, style.frame_corner_radius, transform);
+
+        // Tab pentagon
+        let tx = f.tab_rect.x;
+        let ty = f.tab_rect.y;
+        let tw = f.tab_rect.width;
+        let th = f.tab_rect.height;
+        let fold = 10.0f32.min(tw * 0.3);
+        let mut pb = PathBuilder::new();
+        pb.move_to(tx, ty);
+        pb.line_to(tx + tw, ty);
+        pb.line_to(tx + tw, ty + th - fold);
+        pb.line_to(tx + tw - fold, ty + th);
+        pb.line_to(tx, ty + th);
+        pb.close();
+        if let Some(path) = pb.finish() {
+            let paint = make_paint(frame_fill_color);
+            pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
+            let stroke_paint = make_paint(fg);
+            let stroke = make_stroke(style.frame_stroke_width, None);
+            pixmap.stroke_path(&path, &stroke_paint, &stroke, transform, None);
+        }
+
+        render_text(font, pixmap, &f.tab_label, fg, transform);
+        if let Some(ref cond) = f.condition_label {
+            render_text(font, pixmap, cond, fg, transform);
+        }
+
+        for div in &f.else_dividers {
+            draw_line(pixmap, div.x_start, div.y, div.x_end, div.y, fg, style.frame_stroke_width, Some(&frame_else_dash), transform);
+            if let Some(ref label) = div.label {
+                render_text(font, pixmap, label, fg, transform);
+            }
+        }
+    }
+
+    // Activation boxes
+    let activation_fill = opts.activation_fill;
+    for ab in &layout.activation_boxes {
+        fill_rect(pixmap, &ab.rect, activation_fill, transform);
+        stroke_rect(pixmap, &ab.rect, fg, style.activation_stroke_width, 0.0, transform);
+    }
+
     // Notes
     for n in &layout.notes {
         fill_rect(pixmap, &n.rect, note_bg, transform);
         stroke_rect(pixmap, &n.rect, fg, style.note_stroke_width, style.note_corner_radius, transform);
-        render_text(font, pixmap, &n.text, fg, transform);
+        render_text(font, pixmap, &n.text, note_text, transform);
+    }
+
+    // Destroy markers
+    for dm in &layout.destroy_markers {
+        let s = dm.size;
+        draw_line(pixmap, dm.center_x - s, dm.center_y - s, dm.center_x + s, dm.center_y + s, fg, style.destroy_stroke_width, None, transform);
+        draw_line(pixmap, dm.center_x + s, dm.center_y - s, dm.center_x - s, dm.center_y + s, fg, style.destroy_stroke_width, None, transform);
     }
 }

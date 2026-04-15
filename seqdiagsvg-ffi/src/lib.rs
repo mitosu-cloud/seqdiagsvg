@@ -43,6 +43,11 @@ struct ThemeColors {
     fg: [u8; 4],
     bg: [u8; 4],
     note_color: [u8; 4],
+    actor_fill: [u8; 4],
+    actor_text: [u8; 4],
+    note_text: [u8; 4],
+    activation_fill: [u8; 4],
+    frame_fill: [u8; 4],
 }
 
 /// Extract fg/bg/note RGBA colors from Mitosu theme JSON.
@@ -100,7 +105,45 @@ fn extract_colors(theme_json: &str) -> Result<ThemeColors, SeqDiagError> {
             [0xFF, 0xFF, 0xCC, 0xFF]
         });
 
-    Ok(ThemeColors { fg, bg, note_color })
+    // Actor box fill: light fill so text stands out — seqdiag.actorFill -> default
+    // Dark mode: light gray box; Light mode: white box
+    let actor_fill = get("seqdiag.actorFill")
+        .and_then(|hex| parse_hex_color(&hex))
+        .unwrap_or(if is_dark {
+            [0xE0, 0xE0, 0xE0, 0xFF]  // light gray on dark themes
+        } else {
+            [0xFF, 0xFF, 0xFF, 0xFF]
+        });
+
+    // Actor text: dark text to contrast with light actor_fill
+    let actor_text = get("seqdiag.actorText")
+        .and_then(|hex| parse_hex_color(&hex))
+        .unwrap_or([0x1A, 0x1A, 0x1A, 0xFF]);  // near-black, always readable
+
+    // Note text: seqdiag.noteText -> default dark text (readable against note_color)
+    let note_text = get("seqdiag.noteText")
+        .and_then(|hex| parse_hex_color(&hex))
+        .unwrap_or([0x1A, 0x1A, 0x1A, 0xFF]);
+
+    // Activation box fill: seqdiag.activationFill -> default
+    let activation_fill = get("seqdiag.activationFill")
+        .and_then(|hex| parse_hex_color(&hex))
+        .unwrap_or(if is_dark {
+            [0x3A, 0x3A, 0x3A, 0xFF]
+        } else {
+            [0xFF, 0xFF, 0xFF, 0xFF]
+        });
+
+    // Frame fill: seqdiag.frameFill -> default (nearly transparent tint)
+    let frame_fill = get("seqdiag.frameFill")
+        .and_then(|hex| parse_hex_color(&hex))
+        .unwrap_or(if is_dark {
+            [0x2A, 0x2A, 0x2A, 0xFF]
+        } else {
+            [0xF8, 0xF8, 0xF8, 0xFF]
+        });
+
+    Ok(ThemeColors { fg, bg, note_color, actor_fill, actor_text, note_text, activation_fill, frame_fill })
 }
 
 /// Parse #RGB, #RRGGBB, or #RRGGBBAA hex color to [u8; 4] RGBA.
@@ -212,11 +255,16 @@ pub fn render_seqdiag_for_note(
         fg_color: theme.fg,
         bg_color: theme.bg,
         note_color: theme.note_color,
+        actor_fill: theme.actor_fill,
+        actor_text_color: theme.actor_text,
+        note_text_color: theme.note_text,
         padding: 16,
         system_font: None,
         style: seqdiagsvg::StyleConfig::default(),
         max_width: if width > 0.0 { Some(width) } else { None },
         max_height: if height > 0.0 { Some(height) } else { None },
+        activation_fill: theme.activation_fill,
+        frame_fill: theme.frame_fill,
     };
 
     // Write to a temp file then atomically rename to prevent partial reads

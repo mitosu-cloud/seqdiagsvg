@@ -252,3 +252,67 @@ fn test_max_constraint_no_upscale() {
     };
     assert_eq!(extract_dims(&svg_natural), extract_dims(&svg_huge));
 }
+
+const WSD_CLIENT_DIAGRAM: &str = "\
+title WebSequenceDiagrams Client
+
+Caller->+Client: Generate Diagram
+Client->+WebSequenceDiagrams: Create Diagram
+
+alt no api key and using paid features
+    WebSequenceDiagrams-->Client: 402 - You need to pay
+    Client-->Caller: <YouNeedToPayWSDSome$$$Error>
+end alt
+
+WebSequenceDiagrams-->-Client: 200 - <Errors, Link to Diagram>
+
+alt has errors
+    Client-->Caller: <InvalidSequenceDiagramError>
+end alt
+
+Client->+WebSequenceDiagrams: Get image
+WebSequenceDiagrams-->-Client: <Image>
+Client-->-Caller: <Image>
+";
+
+#[test]
+fn test_wsd_client_svg() {
+    let svg = render_to_svg(WSD_CLIENT_DIAGRAM, None).unwrap();
+    assert!(svg.starts_with("<svg"));
+    assert!(svg.ends_with("</svg>"));
+    // Should have alt frames
+    assert!(svg.contains("<rect"), "SVG should contain rectangles for frames");
+}
+
+#[test]
+fn test_wsd_client_png() {
+    let png = render_to_png(WSD_CLIENT_DIAGRAM, None).unwrap();
+    assert_eq!(&png[0..4], &[0x89, 0x50, 0x4E, 0x47]);
+    assert!(png.len() > 1000, "PNG should be reasonably large for a complex diagram");
+}
+
+#[test]
+fn test_wsd_client_dollar_signs_rendered() {
+    // Verify that $$$ characters produce glyph references in SVG
+    let svg = render_to_svg(WSD_CLIENT_DIAGRAM, None).unwrap();
+    // Count <use> elements — a complex diagram should have many glyphs
+    let use_count = svg.matches("<use ").count();
+    assert!(use_count > 100, "expected >100 glyph uses, got {}", use_count);
+}
+
+#[test]
+fn test_wsd_client_dark_theme() {
+    let opts = RenderOptions {
+        fg_color: [0xD4, 0xD4, 0xD4, 0xFF],
+        bg_color: [0x1E, 0x1E, 0x1E, 0xFF],
+        note_color: [0x33, 0x33, 0x33, 0xFF],
+        actor_fill: [0xE0, 0xE0, 0xE0, 0xFF],
+        actor_text_color: [0x1A, 0x1A, 0x1A, 0xFF],
+        note_text_color: [0x1A, 0x1A, 0x1A, 0xFF],
+        ..RenderOptions::default()
+    };
+    let svg = render_to_svg(WSD_CLIENT_DIAGRAM, Some(opts)).unwrap();
+    assert!(svg.contains("#1e1e1e"), "SVG should contain dark background");
+    assert!(svg.contains("#e0e0e0"), "SVG should contain light actor fill");
+    assert!(svg.contains("#1a1a1a"), "SVG should contain dark actor text");
+}

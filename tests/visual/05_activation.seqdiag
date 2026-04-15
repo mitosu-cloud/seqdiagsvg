@@ -1,0 +1,14 @@
+title WebSequenceDiagrams Client
+Caller->+Client: Generate Diagram
+Client->+WebSequenceDiagrams: Create Diagram
+alt no api key and using paid features
+    WebSequenceDiagrams-->Client: 402 - You need to pay
+    Client-->Caller: <YouNeedToPayWSDSome$$$Error>
+end alt
+WebSequenceDiagrams-->-Client: 200 - <Errors, Link to Diagram>
+alt has errors
+    Client-->Caller: <InvalidSequenceDiagramError>
+end alt
+Client->+WebSequenceDiagrams: Get image
+WebSequenceDiagrams-->-Client: <Image>
+Client-->-Caller: <Image>

@@ -1,0 +1,5 @@
+title Basic Messages
+Alice->Bob: Solid, open arrow
+Alice->>Bob: Solid, closed arrow
+Bob-->Alice: Dashed, open arrow
+Bob-->>Alice: Dashed, closed arrow

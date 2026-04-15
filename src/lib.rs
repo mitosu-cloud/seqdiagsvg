@@ -5,7 +5,9 @@ mod parse;
 mod png_render;
 mod svg_render;
 
-pub use ast::{Arrow, Document, HeadStyle, LineStyle, NotePosition, Statement};
+pub use ast::{
+    ActivationModifier, Arrow, Document, FrameKind, HeadStyle, LineStyle, NotePosition, Statement,
+};
 pub use parse::{parse_document, resolve_actors};
 
 /// Style configuration for stroke widths, corner radii, and dash patterns.
@@ -26,6 +28,18 @@ pub struct StyleConfig {
     pub lifeline_dash: [f32; 2],
     /// Dash pattern for dashed messages [dash, gap] (default: [8.0, 4.0])
     pub message_dash: [f32; 2],
+    /// Stroke width for activation box outlines (default: 1.0)
+    pub activation_stroke_width: f32,
+    /// Stroke width for frame outlines (default: 1.0)
+    pub frame_stroke_width: f32,
+    /// Corner radius for frame rectangles (default: 3.0)
+    pub frame_corner_radius: f32,
+    /// Dash pattern for frame else dividers [dash, gap] (default: [6.0, 4.0])
+    pub frame_else_dash: [f32; 2],
+    /// Stroke width for destroy X markers (default: 2.0)
+    pub destroy_stroke_width: f32,
+    /// Arrowhead marker size (default: 12.0)
+    pub marker_size: f32,
 }
 
 impl Default for StyleConfig {
@@ -39,6 +53,12 @@ impl Default for StyleConfig {
             note_corner_radius: 2.0,
             lifeline_dash: [6.0, 4.0],
             message_dash: [8.0, 4.0],
+            activation_stroke_width: 1.0,
+            frame_stroke_width: 1.0,
+            frame_corner_radius: 3.0,
+            frame_else_dash: [6.0, 4.0],
+            destroy_stroke_width: 2.0,
+            marker_size: 12.0,
         }
     }
 }
@@ -55,6 +75,15 @@ pub struct RenderOptions {
     pub bg_color: [u8; 4],
     /// RGBA note background color (default: yellow [0xFF, 0xFF, 0xCC, 0xFF])
     pub note_color: [u8; 4],
+    /// RGBA actor box fill color (default: white [0xFF, 0xFF, 0xFF, 0xFF])
+    pub actor_fill: [u8; 4],
+    /// RGBA actor box text color — used for labels inside actor boxes.
+    /// If different from fg_color, ensures readability against actor_fill.
+    /// (default: dark gray [0x33, 0x33, 0x33, 0xFF])
+    pub actor_text_color: [u8; 4],
+    /// RGBA note text color — used for text inside note boxes.
+    /// (default: dark gray [0x33, 0x33, 0x33, 0xFF])
+    pub note_text_color: [u8; 4],
     /// Padding in pixels around the diagram
     pub padding: u32,
     /// Optional path to an additional system font (OTF/TTF).
@@ -66,6 +95,10 @@ pub struct RenderOptions {
     pub max_width: Option<f32>,
     /// Maximum height in pixels. If the diagram exceeds this, it scales down uniformly.
     pub max_height: Option<f32>,
+    /// RGBA activation box fill color (default: white)
+    pub activation_fill: [u8; 4],
+    /// RGBA frame background fill color (default: nearly transparent)
+    pub frame_fill: [u8; 4],
 }
 
 impl Default for RenderOptions {
@@ -76,11 +109,16 @@ impl Default for RenderOptions {
             fg_color: [0x33, 0x33, 0x33, 0xFF],
             bg_color: [0xFF, 0xFF, 0xFF, 0xFF],
             note_color: [0xFF, 0xFF, 0xCC, 0xFF],
+            actor_fill: [0xFF, 0xFF, 0xFF, 0xFF],
+            actor_text_color: [0x33, 0x33, 0x33, 0xFF],
+            note_text_color: [0x33, 0x33, 0x33, 0xFF],
             padding: 16,
             system_font: None,
             style: StyleConfig::default(),
             max_width: None,
             max_height: None,
+            activation_fill: [0xFF, 0xFF, 0xFF, 0xFF],
+            frame_fill: [0xF8, 0xF8, 0xF8, 0xFF],
         }
     }
 }

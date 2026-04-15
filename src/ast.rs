@@ -17,11 +17,24 @@ pub enum Statement {
         to: String,
         arrow: Arrow,
         text: String,
+        activation: Option<ActivationModifier>,
+        delay: Option<u8>,
     },
     Note {
         position: NotePosition,
         text: String,
     },
+    Activate(String),
+    Deactivate(String),
+    Destroy(String),
+    FrameOpen {
+        kind: FrameKind,
+        label: String,
+    },
+    FrameElse {
+        label: String,
+    },
+    FrameEnd,
 }
 
 /// Arrow style combining line and head variants.
@@ -47,6 +60,39 @@ pub enum HeadStyle {
     Open,
     /// `>>` closed/filled arrowhead
     Closed,
+}
+
+/// Activation modifier on a message arrow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivationModifier {
+    /// `+` activate target actor
+    Activate,
+    /// `-` deactivate target actor
+    Deactivate,
+}
+
+/// Kind of frame block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameKind {
+    Alt,
+    Opt,
+    Loop,
+    Par,
+    Critical,
+    Break,
+}
+
+impl std::fmt::Display for FrameKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrameKind::Alt => write!(f, "alt"),
+            FrameKind::Opt => write!(f, "opt"),
+            FrameKind::Loop => write!(f, "loop"),
+            FrameKind::Par => write!(f, "par"),
+            FrameKind::Critical => write!(f, "critical"),
+            FrameKind::Break => write!(f, "break"),
+        }
+    }
 }
 
 /// Placement of a note in the diagram.

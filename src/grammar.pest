@@ -1,5 +1,5 @@
 // Sequence diagram PEG grammar
-// Based on bramp/js-sequence-diagrams syntax
+// Based on bramp/js-sequence-diagrams + WebSequenceDiagrams syntax
 
 WHITESPACE = _{ " " | "\t" }
 
@@ -11,11 +11,20 @@ comment = _{ "#" ~ (!newline ~ ANY)* }
 
 empty_line = _{ WHITESPACE* }
 
+// Statement ordering matters for PEG:
+// - message_stmt before frame keywords so "alt->Bob: text" parses as a message
+// - keyword statements after message_stmt so they only match when no arrow is found
 statement = _{
     title_stmt
   | participant_stmt
   | note_stmt
   | message_stmt
+  | activate_stmt
+  | deactivate_stmt
+  | destroy_stmt
+  | frame_open_stmt
+  | frame_else_stmt
+  | end_stmt
 }
 
 newline = _{ "\r\n" | "\n" | "\r" }
@@ -44,15 +53,23 @@ note_right_of = { ^"right" ~ ^"of" ~ actor_name }
 note_over     = { ^"over" ~ actor_name ~ ("," ~ actor_name)? }
 
 // Alice->Bob: Hello
-// Alice-->Bob: Response
-// Alice->>Bob: Async
-// Alice-->>Bob: Async Response
-message_stmt = { actor_name ~ arrow ~ actor_name ~ ":" ~ message_text }
+// Alice->+Bob: Hello (activate Bob)
+// Alice-->-Bob: Done (deactivate Bob)
+// Alice->(3)Bob: Delayed message
+// Alice->(3)+Bob: Delayed + activate
+message_stmt = { actor_name ~ arrow ~ delay_factor? ~ activation_modifier? ~ actor_name ~ ":" ~ message_text }
 
 // Arrow variants: -->> must come before --> which must come before ->> and ->
 arrow = {
     "-->>" | "-->" | "->>" | "->"
 }
+
+// Optional activation modifier between arrow and target actor
+activation_modifier = { "+" | "-" }
+
+// Optional delay factor for slanted arrows: (1), (3), (5), etc.
+delay_factor = { "(" ~ delay_value ~ ")" }
+delay_value = @{ ASCII_DIGIT+ }
 
 // Actor names: everything up to an arrow, colon, comma, or keyword boundary
 // We use a greedy match up to the delimiter
@@ -62,3 +79,18 @@ arrow_start = _{ ("-->" | "->") }
 
 // Message text: everything to end of line
 message_text = @{ (!newline ~ ANY)+ }
+
+// Standalone activation control
+activate_stmt   = { ^"activate" ~ actor_name }
+deactivate_stmt = { ^"deactivate" ~ actor_name }
+destroy_stmt    = { ^"destroy" ~ actor_name }
+
+// Frame blocks: alt, opt, loop, par, critical, break
+frame_open_stmt = { frame_keyword ~ frame_label? }
+frame_keyword   = @{ ^"alt" | ^"opt" | ^"loop" | ^"par" | ^"critical" | ^"break" }
+frame_label     = @{ (!newline ~ ANY)+ }
+
+frame_else_stmt = { ^"else" ~ frame_label? }
+
+// "end" optionally followed by anything (e.g. "end alt", "end loop")
+end_stmt = { ^"end" ~ (!newline ~ ANY)* }

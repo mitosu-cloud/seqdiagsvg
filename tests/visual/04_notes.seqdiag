@@ -1,0 +1,5 @@
+Alice->Bob: Hello Bob
+note left of Alice: This is\na note
+note right of Alice: Right note
+note over Alice: Over note
+note over Alice, Bob: Spanning note

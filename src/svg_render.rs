@@ -42,12 +42,7 @@ impl OutlinePen for SvgPen {
         write!(
             self.d,
             "C{} {} {} {} {} {}",
-            fmt(cx0),
-            fmt(cy0),
-            fmt(cx1),
-            fmt(cy1),
-            fmt(x),
-            fmt(y)
+            fmt(cx0), fmt(cy0), fmt(cx1), fmt(cy1), fmt(x), fmt(y)
         )
         .unwrap();
     }
@@ -56,7 +51,6 @@ impl OutlinePen for SvgPen {
     }
 }
 
-/// Glyph def key: (glyph_id, font_size_bits, font_source)
 type GlyphKey = (u16, u32, FontSource);
 
 fn glyph_path_data(
@@ -73,11 +67,7 @@ fn glyph_path_data(
     let settings = DrawSettings::unhinted(size, LocationRef::default());
     let mut pen = SvgPen::new();
     outline.draw(settings, &mut pen).ok()?;
-    if pen.d.is_empty() {
-        None
-    } else {
-        Some(pen.d)
-    }
+    if pen.d.is_empty() { None } else { Some(pen.d) }
 }
 
 fn color_to_svg(rgba: [u8; 4]) -> String {
@@ -92,7 +82,6 @@ fn color_to_svg(rgba: [u8; 4]) -> String {
     }
 }
 
-/// Collect all unique (glyph_id, font_size_bits, font_source) from all text.
 fn collect_text_glyphs(
     font: &DiagramFont,
     texts: &[&PositionedText],
@@ -107,8 +96,19 @@ fn collect_text_glyphs(
     }
 }
 
-/// Render positioned text as a series of <use> references, with multi-line support.
 fn render_text_uses(
+    out: &mut String,
+    font: &DiagramFont,
+    pt: &PositionedText,
+    defs: &HashMap<GlyphKey, String>,
+) {
+    // Glyph paths are filled shapes — suppress inherited stroke so text has no outline
+    out.push_str(r#"<g stroke="none">"#);
+    render_text_uses_inner(out, font, pt, defs);
+    out.push_str("</g>");
+}
+
+fn render_text_uses_inner(
     out: &mut String,
     font: &DiagramFont,
     pt: &PositionedText,
@@ -133,9 +133,7 @@ fn render_text_uses(
                     write!(
                         out,
                         "<use href=\"#{}\" transform=\"matrix(1 0 0 -1 {} {})\"/>",
-                        def_id,
-                        fmt(cx),
-                        fmt(y)
+                        def_id, fmt(cx), fmt(y)
                     )
                     .unwrap();
                 }
@@ -146,6 +144,18 @@ fn render_text_uses(
     }
 }
 
+fn render_text_uses_colored(
+    out: &mut String,
+    font: &DiagramFont,
+    pt: &PositionedText,
+    defs: &HashMap<GlyphKey, String>,
+    color: &str,
+) {
+    write!(out, r#"<g fill="{}" stroke="none">"#, color).unwrap();
+    render_text_uses_inner(out, font, pt, defs);
+    out.push_str("</g>");
+}
+
 pub fn render_to_svg_string(
     font: &DiagramFont,
     layout: &DiagramLayout,
@@ -153,22 +163,29 @@ pub fn render_to_svg_string(
 ) -> String {
     let fg = color_to_svg(opts.fg_color);
     let bg = color_to_svg(opts.bg_color);
+    let actor_fill_color = color_to_svg(opts.actor_fill);
+    let actor_text = color_to_svg(opts.actor_text_color);
+    let note_text = color_to_svg(opts.note_text_color);
+    let activation_fill = color_to_svg(opts.activation_fill);
+    let frame_fill = color_to_svg(opts.frame_fill);
     let style = &opts.style;
+    let ms = style.marker_size;
 
-    // Collect all text elements
+    // Collect all text elements (including frame labels)
     let mut all_texts: Vec<&PositionedText> = Vec::new();
-    if let Some(ref t) = layout.title {
-        all_texts.push(t);
-    }
+    if let Some(ref t) = layout.title { all_texts.push(t); }
     for a in &layout.actors {
         all_texts.push(&a.top_label);
         all_texts.push(&a.bottom_label);
     }
-    for m in &layout.messages {
-        all_texts.push(&m.label);
-    }
-    for n in &layout.notes {
-        all_texts.push(&n.text);
+    for m in &layout.messages { all_texts.push(&m.label); }
+    for n in &layout.notes { all_texts.push(&n.text); }
+    for f in &layout.frames {
+        all_texts.push(&f.tab_label);
+        if let Some(ref c) = f.condition_label { all_texts.push(c); }
+        for d in &f.else_dividers {
+            if let Some(ref l) = d.label { all_texts.push(l); }
+        }
     }
 
     // Build glyph defs
@@ -189,7 +206,7 @@ pub fn render_to_svg_string(
         }
     }
 
-    // SVG header — viewBox is always the natural size; width/height may be clamped
+    // SVG header
     let natural_w = layout.width;
     let natural_h = layout.height;
     let scale_factor = match (opts.max_width, opts.max_height) {
@@ -205,43 +222,30 @@ pub fn render_to_svg_string(
     write!(
         svg,
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" width="{}" height="{}">"#,
-        fmt(natural_w),
-        fmt(natural_h),
-        fmt(display_w),
-        fmt(display_h)
-    )
-    .unwrap();
+        fmt(natural_w), fmt(natural_h), fmt(display_w), fmt(display_h)
+    ).unwrap();
 
     // Defs: glyph paths + arrowhead markers
     svg.push_str("<defs>");
     svg.push_str(&defs_svg);
 
-    // Open arrowhead marker (two lines forming a V)
+    let half_ms = ms / 2.0;
     write!(
         svg,
-        r#"<marker id="arrow-open" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10" fill="none" stroke="{}" stroke-width="{}"/></marker>"#,
-        fg, fmt(style.arrow_stroke_width)
-    )
-    .unwrap();
-
-    // Closed arrowhead marker (filled triangle)
+        r#"<marker id="arrow-open" markerWidth="{ms}" markerHeight="{ms}" refX="{ms}" refY="{half}" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L{ms},{half} L0,{ms}" fill="none" stroke="{fg}" stroke-width="{sw}"/></marker>"#,
+        ms = fmt(ms), half = fmt(half_ms), fg = fg, sw = fmt(style.arrow_stroke_width)
+    ).unwrap();
     write!(
         svg,
-        r#"<marker id="arrow-closed" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 Z" fill="{}"/></marker>"#,
-        fg
-    )
-    .unwrap();
+        r#"<marker id="arrow-closed" markerWidth="{ms}" markerHeight="{ms}" refX="{ms}" refY="{half}" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L{ms},{half} L0,{ms} Z" fill="{fg}"/></marker>"#,
+        ms = fmt(ms), half = fmt(half_ms), fg = fg
+    ).unwrap();
 
     svg.push_str("</defs>");
 
     // Background
     if opts.bg_color[3] > 0 {
-        write!(
-            svg,
-            r#"<rect width="100%" height="100%" fill="{}"/>"#,
-            bg
-        )
-        .unwrap();
+        write!(svg, r#"<rect width="100%" height="100%" fill="{}"/>"#, bg).unwrap();
     }
 
     // Content group
@@ -252,28 +256,88 @@ pub fn render_to_svg_string(
         render_text_uses(&mut svg, font, t, &defs_map);
     }
 
-    // Lifelines (dashed vertical lines, drawn behind everything else)
+    // Lifelines
     for ll in &layout.lifelines {
         write!(
             svg,
             r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke-dasharray="{},{}" stroke-width="{}" fill="none"/>"#,
-            fmt(ll.x),
-            fmt(ll.y_start),
-            fmt(ll.x),
-            fmt(ll.y_end),
-            fmt(style.lifeline_dash[0]),
-            fmt(style.lifeline_dash[1]),
+            fmt(ll.x), fmt(ll.y_start), fmt(ll.x), fmt(ll.y_end),
+            fmt(style.lifeline_dash[0]), fmt(style.lifeline_dash[1]),
             fmt(style.lifeline_stroke_width)
-        )
-        .unwrap();
+        ).unwrap();
+    }
+
+    // Frames (behind messages/notes, in front of lifelines)
+    for f in &layout.frames {
+        // Outer frame rectangle
+        write!(
+            svg,
+            r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}" rx="{}"/>"#,
+            fmt(f.outer_rect.x), fmt(f.outer_rect.y),
+            fmt(f.outer_rect.width), fmt(f.outer_rect.height),
+            frame_fill, fg, fmt(style.frame_stroke_width), fmt(style.frame_corner_radius)
+        ).unwrap();
+
+        // Tab pentagon
+        let tx = f.tab_rect.x;
+        let ty = f.tab_rect.y;
+        let tw = f.tab_rect.width;
+        let th = f.tab_rect.height;
+        let fold = FRAME_TAB_FOLD.min(tw * 0.3);
+        write!(
+            svg,
+            r#"<path d="M{} {} L{} {} L{} {} L{} {} L{} {} Z" fill="{}" stroke="{}" stroke-width="{}"/>"#,
+            fmt(tx), fmt(ty),
+            fmt(tx + tw), fmt(ty),
+            fmt(tx + tw), fmt(ty + th - fold),
+            fmt(tx + tw - fold), fmt(ty + th),
+            fmt(tx), fmt(ty + th),
+            frame_fill, fg, fmt(style.frame_stroke_width)
+        ).unwrap();
+
+        // Tab label
+        render_text_uses(&mut svg, font, &f.tab_label, &defs_map);
+
+        // Condition label
+        if let Some(ref cond) = f.condition_label {
+            render_text_uses(&mut svg, font, cond, &defs_map);
+        }
+
+        // Else dividers
+        for div in &f.else_dividers {
+            write!(
+                svg,
+                r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-dasharray="{},{}" stroke-width="{}" fill="none"/>"#,
+                fmt(div.x_start), fmt(div.y), fmt(div.x_end), fmt(div.y),
+                fg, fmt(style.frame_else_dash[0]), fmt(style.frame_else_dash[1]),
+                fmt(style.frame_stroke_width)
+            ).unwrap();
+            if let Some(ref label) = div.label {
+                render_text_uses(&mut svg, font, label, &defs_map);
+            }
+        }
+    }
+
+    // Activation boxes
+    for ab in &layout.activation_boxes {
+        write!(
+            svg,
+            r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
+            fmt(ab.rect.x), fmt(ab.rect.y), fmt(ab.rect.width), fmt(ab.rect.height),
+            activation_fill, fg, fmt(style.activation_stroke_width)
+        ).unwrap();
     }
 
     // Actor boxes
     for a in &layout.actors {
-        render_box(&mut svg, &a.top_box, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
-        render_text_uses(&mut svg, font, &a.top_label, &defs_map);
-        render_box(&mut svg, &a.bottom_box, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
-        render_text_uses(&mut svg, font, &a.bottom_label, &defs_map);
+        if a.top_box.height > 0.0 {
+            render_box(&mut svg, &a.top_box, &actor_fill_color, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
+            render_text_uses_colored(&mut svg, font, &a.top_label, &defs_map, &actor_text);
+        }
+        if a.bottom_box.height > 0.0 {
+            render_box(&mut svg, &a.bottom_box, &actor_fill_color, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
+            render_text_uses_colored(&mut svg, font, &a.bottom_label, &defs_map, &actor_text);
+        }
     }
 
     // Messages
@@ -290,31 +354,21 @@ pub fn render_to_svg_string(
         if m.is_self {
             let x = m.from_x;
             let jog_x = x + 40.0;
-            let y1 = m.y;
-            let y2 = m.y + 30.0;
+            let y1 = m.from_y;
+            let y2 = m.from_y + 30.0;
             write!(
                 svg,
                 r#"<path d="M{} {} L{} {} L{} {} L{} {}" fill="none" stroke-width="{}"{} marker-end="{}"/>"#,
-                fmt(x), fmt(y1),
-                fmt(jog_x), fmt(y1),
-                fmt(jog_x), fmt(y2),
-                fmt(x), fmt(y2),
+                fmt(x), fmt(y1), fmt(jog_x), fmt(y1), fmt(jog_x), fmt(y2), fmt(x), fmt(y2),
                 fmt(style.arrow_stroke_width), dash, marker
-            )
-            .unwrap();
+            ).unwrap();
         } else {
             write!(
                 svg,
                 r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke-width="{}" fill="none"{} marker-end="{}"/>"#,
-                fmt(m.from_x),
-                fmt(m.y),
-                fmt(m.to_x),
-                fmt(m.y),
-                fmt(style.arrow_stroke_width),
-                dash,
-                marker
-            )
-            .unwrap();
+                fmt(m.from_x), fmt(m.from_y), fmt(m.to_x), fmt(m.to_y),
+                fmt(style.arrow_stroke_width), dash, marker
+            ).unwrap();
         }
 
         render_text_uses(&mut svg, font, &m.label, &defs_map);
@@ -326,34 +380,41 @@ pub fn render_to_svg_string(
         write!(
             svg,
             "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\" rx=\"{}\"/>",
-            fmt(n.rect.x),
-            fmt(n.rect.y),
-            fmt(n.rect.width),
-            fmt(n.rect.height),
-            note_bg,
-            fg,
-            fmt(style.note_stroke_width),
-            fmt(style.note_corner_radius)
-        )
-        .unwrap();
-        render_text_uses(&mut svg, font, &n.text, &defs_map);
+            fmt(n.rect.x), fmt(n.rect.y), fmt(n.rect.width), fmt(n.rect.height),
+            note_bg, fg, fmt(style.note_stroke_width), fmt(style.note_corner_radius)
+        ).unwrap();
+        render_text_uses_colored(&mut svg, font, &n.text, &defs_map, &note_text);
+    }
+
+    // Destroy markers (X crosses)
+    for dm in &layout.destroy_markers {
+        let s = dm.size;
+        write!(
+            svg,
+            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" fill="none"/>"#,
+            fmt(dm.center_x - s), fmt(dm.center_y - s), fmt(dm.center_x + s), fmt(dm.center_y + s),
+            fg, fmt(style.destroy_stroke_width)
+        ).unwrap();
+        write!(
+            svg,
+            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" fill="none"/>"#,
+            fmt(dm.center_x + s), fmt(dm.center_y - s), fmt(dm.center_x - s), fmt(dm.center_y + s),
+            fg, fmt(style.destroy_stroke_width)
+        ).unwrap();
     }
 
     svg.push_str("</g></svg>");
     svg
 }
 
-fn render_box(out: &mut String, rect: &Rect, stroke_color: &str, stroke_width: f32, corner_radius: f32) {
+fn render_box(out: &mut String, rect: &Rect, fill_color: &str, stroke_color: &str, stroke_width: f32, corner_radius: f32) {
     write!(
         out,
-        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="white" stroke="{}" stroke-width="{}" rx="{}"/>"#,
-        fmt(rect.x),
-        fmt(rect.y),
-        fmt(rect.width),
-        fmt(rect.height),
-        stroke_color,
-        fmt(stroke_width),
-        fmt(corner_radius)
-    )
-    .unwrap();
+        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}" rx="{}"/>"#,
+        fmt(rect.x), fmt(rect.y), fmt(rect.width), fmt(rect.height),
+        fill_color, stroke_color, fmt(stroke_width), fmt(corner_radius)
+    ).unwrap();
 }
+
+// Re-export constant for layout reference
+const FRAME_TAB_FOLD: f32 = 10.0;

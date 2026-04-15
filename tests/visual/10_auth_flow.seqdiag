@@ -1,0 +1,8 @@
+title Authentication Flow
+Alice->Bob: Authentication Request
+alt successful
+    Bob->Alice: Authentication Accepted
+else failure
+    Bob->Alice: Authentication Rejected
+end
+note right of Bob: Bob checks\nhis credentials database.
