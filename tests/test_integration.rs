@@ -1,4 +1,4 @@
-use seqdiagsvg::{render_to_png, render_to_svg, RenderOptions, StyleConfig};
+use seqdiagsvg::{render_to_png, render_to_svg, DropShadow, RenderOptions, StyleConfig};
 
 const SAMPLE_DIAGRAM: &str = "\
 title: Auth Flow
@@ -315,4 +315,48 @@ fn test_wsd_client_dark_theme() {
     assert!(svg.contains("#1e1e1e"), "SVG should contain dark background");
     assert!(svg.contains("#e0e0e0"), "SVG should contain light actor fill");
     assert!(svg.contains("#1a1a1a"), "SVG should contain dark actor text");
+}
+
+#[test]
+fn test_drop_shadows() {
+    let input = "Alice->Bob: Hello\nnote right of Bob: Shadowed note\nBob-->Alice: Response";
+    let opts = RenderOptions {
+        actor_shadow: Some(DropShadow::default()),
+        note_shadow: Some(DropShadow {
+            dx: 3.0,
+            dy: 3.0,
+            std_deviation: 4.0,
+            color: [0x00, 0x00, 0x00, 0x66],
+        }),
+        ..RenderOptions::default()
+    };
+    let svg = render_to_svg(input, Some(opts)).unwrap();
+    // Should have filter defs for both shadows
+    assert!(svg.contains("id=\"actor-shadow\""), "SVG should define actor-shadow filter");
+    assert!(svg.contains("id=\"note-shadow\""), "SVG should define note-shadow filter");
+    // Should apply filters to elements
+    assert!(svg.contains("filter=\"url(#actor-shadow)\""), "actor boxes should reference shadow filter");
+    assert!(svg.contains("filter=\"url(#note-shadow)\""), "notes should reference shadow filter");
+    // Filter should use compatible primitives
+    assert!(svg.contains("feGaussianBlur"), "should use feGaussianBlur (not feDropShadow) for compatibility");
+    assert!(svg.contains("feMerge"), "should use feMerge for shadow compositing");
+}
+
+#[test]
+fn test_drop_shadows_png() {
+    // Verify shadows render through resvg without error
+    let input = "Alice->Bob: Hello\nnote right of Bob: Shadow\nBob-->Alice: OK";
+    let opts = RenderOptions {
+        actor_shadow: Some(DropShadow::default()),
+        note_shadow: Some(DropShadow::default()),
+        ..RenderOptions::default()
+    };
+    let png = render_to_png(input, Some(opts)).unwrap();
+    assert_eq!(&png[0..4], &[0x89, 0x50, 0x4E, 0x47]);
+}
+
+#[test]
+fn test_no_shadows_by_default() {
+    let svg = render_to_svg("Alice->Bob: hi\nnote right of Bob: note", None).unwrap();
+    assert!(!svg.contains("filter="), "default rendering should have no shadow filters");
 }

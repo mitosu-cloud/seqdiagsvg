@@ -167,7 +167,7 @@ pub fn render_to_svg_string(
     let actor_text = color_to_svg(opts.actor_text_color);
     let note_text = color_to_svg(opts.note_text_color);
     let activation_fill = color_to_svg(opts.activation_fill);
-    let frame_fill = color_to_svg(opts.frame_fill);
+    // frame_fill resolved per-frame via opts.frame_fill_for_depth()
     let style = &opts.style;
     let ms = style.marker_size;
 
@@ -241,6 +241,14 @@ pub fn render_to_svg_string(
         ms = fmt(ms), half = fmt(half_ms), fg = fg
     ).unwrap();
 
+    // Drop shadow filters (using feGaussianBlur + feOffset + feMerge for max compatibility)
+    if let Some(ref shadow) = opts.actor_shadow {
+        write_shadow_filter(&mut svg, "actor-shadow", shadow);
+    }
+    if let Some(ref shadow) = opts.note_shadow {
+        write_shadow_filter(&mut svg, "note-shadow", shadow);
+    }
+
     svg.push_str("</defs>");
 
     // Background
@@ -269,13 +277,15 @@ pub fn render_to_svg_string(
 
     // Frames (behind messages/notes, in front of lifelines)
     for f in &layout.frames {
+        let ff = color_to_svg(opts.frame_fill_for_depth(f.nesting_depth));
+
         // Outer frame rectangle
         write!(
             svg,
             r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}" rx="{}"/>"#,
             fmt(f.outer_rect.x), fmt(f.outer_rect.y),
             fmt(f.outer_rect.width), fmt(f.outer_rect.height),
-            frame_fill, fg, fmt(style.frame_stroke_width), fmt(style.frame_corner_radius)
+            ff, fg, fmt(style.frame_stroke_width), fmt(style.frame_corner_radius)
         ).unwrap();
 
         // Tab pentagon
@@ -292,7 +302,7 @@ pub fn render_to_svg_string(
             fmt(tx + tw), fmt(ty + th - fold),
             fmt(tx + tw - fold), fmt(ty + th),
             fmt(tx), fmt(ty + th),
-            frame_fill, fg, fmt(style.frame_stroke_width)
+            ff, fg, fmt(style.frame_stroke_width)
         ).unwrap();
 
         // Tab label
@@ -329,13 +339,14 @@ pub fn render_to_svg_string(
     }
 
     // Actor boxes
+    let actor_filter = if opts.actor_shadow.is_some() { r#" filter="url(#actor-shadow)""# } else { "" };
     for a in &layout.actors {
         if a.top_box.height > 0.0 {
-            render_box(&mut svg, &a.top_box, &actor_fill_color, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
+            render_box(&mut svg, &a.top_box, &actor_fill_color, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius, actor_filter);
             render_text_uses_colored(&mut svg, font, &a.top_label, &defs_map, &actor_text);
         }
         if a.bottom_box.height > 0.0 {
-            render_box(&mut svg, &a.bottom_box, &actor_fill_color, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius);
+            render_box(&mut svg, &a.bottom_box, &actor_fill_color, &fg, style.actor_box_stroke_width, style.actor_box_corner_radius, actor_filter);
             render_text_uses_colored(&mut svg, font, &a.bottom_label, &defs_map, &actor_text);
         }
     }
@@ -376,12 +387,13 @@ pub fn render_to_svg_string(
 
     // Notes
     let note_bg = color_to_svg(opts.note_color);
+    let note_filter = if opts.note_shadow.is_some() { r#" filter="url(#note-shadow)""# } else { "" };
     for n in &layout.notes {
         write!(
             svg,
-            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\" rx=\"{}\"/>",
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\" rx=\"{}\"{}/>",
             fmt(n.rect.x), fmt(n.rect.y), fmt(n.rect.width), fmt(n.rect.height),
-            note_bg, fg, fmt(style.note_stroke_width), fmt(style.note_corner_radius)
+            note_bg, fg, fmt(style.note_stroke_width), fmt(style.note_corner_radius), note_filter
         ).unwrap();
         render_text_uses_colored(&mut svg, font, &n.text, &defs_map, &note_text);
     }
@@ -407,13 +419,46 @@ pub fn render_to_svg_string(
     svg
 }
 
-fn render_box(out: &mut String, rect: &Rect, fill_color: &str, stroke_color: &str, stroke_width: f32, corner_radius: f32) {
+fn render_box(out: &mut String, rect: &Rect, fill_color: &str, stroke_color: &str, stroke_width: f32, corner_radius: f32, filter: &str) {
     write!(
         out,
-        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}" rx="{}"/>"#,
+        r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}" rx="{}"{}/>"#,
         fmt(rect.x), fmt(rect.y), fmt(rect.width), fmt(rect.height),
-        fill_color, stroke_color, fmt(stroke_width), fmt(corner_radius)
+        fill_color, stroke_color, fmt(stroke_width), fmt(corner_radius), filter
     ).unwrap();
+}
+
+/// Emit an SVG filter definition for a drop shadow using the universal
+/// feGaussianBlur + feOffset + feMerge approach (max compatibility).
+fn write_shadow_filter(out: &mut String, id: &str, shadow: &crate::DropShadow) {
+    let r = shadow.color[0];
+    let g = shadow.color[1];
+    let b = shadow.color[2];
+    let a = shadow.color[3] as f32 / 255.0;
+    // Expand the filter region so the shadow isn't clipped
+    write!(
+        out,
+        r#"<filter id="{}" x="-20%" y="-20%" width="150%" height="150%" color-interpolation-filters="sRGB">"#,
+        id
+    ).unwrap();
+    write!(
+        out,
+        r#"<feGaussianBlur in="SourceAlpha" stdDeviation="{}"/>"#,
+        fmt(shadow.std_deviation)
+    ).unwrap();
+    write!(
+        out,
+        r#"<feOffset dx="{}" dy="{}" result="offsetblur"/>"#,
+        fmt(shadow.dx), fmt(shadow.dy)
+    ).unwrap();
+    write!(
+        out,
+        r#"<feFlood flood-color="rgb({},{},{})" flood-opacity="{:.2}"/>"#,
+        r, g, b, a
+    ).unwrap();
+    out.push_str(r#"<feComposite in2="offsetblur" operator="in"/>"#);
+    out.push_str(r#"<feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>"#);
+    out.push_str("</filter>");
 }
 
 // Re-export constant for layout reference

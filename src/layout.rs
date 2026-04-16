@@ -13,6 +13,7 @@ const COLUMN_MIN_GAP: f32 = 150.0;
 const MESSAGE_SPACING: f32 = 50.0;
 const NOTE_PAD_X: f32 = 10.0;
 const NOTE_PAD_Y: f32 = 8.0;
+const NOTE_LIFELINE_GAP: f32 = 16.0; // gap between note edge and actor lifeline
 const SELF_MESSAGE_WIDTH: f32 = 40.0;
 const SELF_MESSAGE_HEIGHT: f32 = 40.0;
 const TITLE_MARGIN_BOTTOM: f32 = 16.0;
@@ -97,6 +98,7 @@ pub struct ActivationBoxLayout {
 pub struct FrameLayout {
     pub outer_rect: Rect,
     pub kind: FrameKind,
+    pub nesting_depth: usize,
     pub tab_rect: Rect,
     pub tab_label: PositionedText,
     pub condition_label: Option<PositionedText>,
@@ -192,6 +194,59 @@ pub fn layout_diagram(
                     let per_gap = label_w / span as f32;
                     for g in left..right {
                         gap_widths[g] = gap_widths[g].max(per_gap);
+                    }
+                }
+            }
+        }
+    }
+
+    // Ensure gaps accommodate notes that sit between actors
+    for stmt in &doc.statements {
+        if let Statement::Note { position, text } = stmt {
+            let note_w = font.text_block_width(text, font_size_px) + 2.0 * NOTE_PAD_X;
+            match position {
+                NotePosition::RightOf(actor) => {
+                    // Note sits to the right of this actor — needs gap to next actor
+                    if let Some(&idx) = actor_index.get(actor.as_str()) {
+                        if idx < num_gaps {
+                            let needed = note_w + 2.0 * NOTE_LIFELINE_GAP;
+                            gap_widths[idx] = gap_widths[idx].max(needed);
+                        }
+                    }
+                }
+                NotePosition::LeftOf(actor) => {
+                    // Note sits to the left of this actor — needs gap to previous actor
+                    if let Some(&idx) = actor_index.get(actor.as_str()) {
+                        if idx > 0 {
+                            let needed = note_w + 2.0 * NOTE_LIFELINE_GAP;
+                            gap_widths[idx - 1] = gap_widths[idx - 1].max(needed);
+                        }
+                    }
+                }
+                NotePosition::Over(actor) => {
+                    // Note centered on actor — half extends into each adjacent gap
+                    if let Some(&idx) = actor_index.get(actor.as_str()) {
+                        let half = note_w / 2.0 + NOTE_LIFELINE_GAP;
+                        if idx > 0 {
+                            gap_widths[idx - 1] = gap_widths[idx - 1].max(half * 2.0);
+                        }
+                        if idx < num_gaps {
+                            gap_widths[idx] = gap_widths[idx].max(half * 2.0);
+                        }
+                    }
+                }
+                NotePosition::OverBetween(a, b) => {
+                    // Spanning note — ensure total span is wide enough
+                    if let (Some(&ai), Some(&bi)) = (actor_index.get(a.as_str()), actor_index.get(b.as_str())) {
+                        let left = ai.min(bi);
+                        let right = ai.max(bi);
+                        let span = right - left;
+                        if span > 0 {
+                            let per_gap = (note_w + 20.0) / span as f32;
+                            for g in left..right {
+                                gap_widths[g] = gap_widths[g].max(per_gap);
+                            }
+                        }
                     }
                 }
             }
@@ -363,19 +418,24 @@ pub fn layout_diagram(
 
                 let (note_x, final_w) = match position {
                     NotePosition::LeftOf(actor) => {
+                        // Right edge of note sits to the left of the actor's lifeline.
+                        // Don't clamp here — the bounds check will shift everything right if needed.
                         let idx = actor_index.get(actor.as_str()).copied().unwrap_or(0);
-                        let x = (centers[idx] - note_w - 10.0).max(padding);
+                        let x = centers[idx] - NOTE_LIFELINE_GAP - note_w;
                         (x, note_w)
                     }
                     NotePosition::RightOf(actor) => {
+                        // Left edge of note sits to the right of the actor's lifeline
                         let idx = actor_index.get(actor.as_str()).copied().unwrap_or(0);
-                        (centers[idx] + 10.0, note_w)
+                        (centers[idx] + NOTE_LIFELINE_GAP, note_w)
                     }
                     NotePosition::Over(actor) => {
+                        // Centered on the actor's lifeline
                         let idx = actor_index.get(actor.as_str()).copied().unwrap_or(0);
                         (centers[idx] - note_w / 2.0, note_w)
                     }
                     NotePosition::OverBetween(a, b) => {
+                        // Centered between two actors, spanning at least their gap
                         let ai = actor_index.get(a.as_str()).copied().unwrap_or(0);
                         let bi = actor_index.get(b.as_str()).copied().unwrap_or(0);
                         let mid = (centers[ai] + centers[bi]) / 2.0;
@@ -530,7 +590,7 @@ pub fn layout_diagram(
                     }).collect();
 
                     frames.push(FrameLayout {
-                        outer_rect, kind: open_frame.kind, tab_rect, tab_label, condition_label, else_dividers,
+                        outer_rect, kind: open_frame.kind, nesting_depth: open_frame.nesting_depth, tab_rect, tab_label, condition_label, else_dividers,
                     });
                     y_cursor += FRAME_SPACING;
                 }

@@ -1,3 +1,7 @@
 /target
 tests/visual/output/
 .DS_Store
+seqdiagsvg-ffi/target
+seqdiagsvg-ffi/SeqDiagRenderer.xcframework/ios-arm64/libseqdiagsvg_ffi.a
+seqdiagsvg-ffi/SeqDiagRenderer.xcframework/ios-arm64-simulator/libseqdiagsvg_ffi.a
+seqdiagsvg-ffi/SeqDiagRenderer.xcframework/macos-arm64_x86_64/libseqdiagsvg_ffi.a

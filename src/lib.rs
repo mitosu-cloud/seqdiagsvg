@@ -2,13 +2,37 @@ pub mod ast;
 mod font;
 mod layout;
 mod parse;
-mod png_render;
 mod svg_render;
 
 pub use ast::{
     ActivationModifier, Arrow, Document, FrameKind, HeadStyle, LineStyle, NotePosition, Statement,
 };
 pub use parse::{parse_document, resolve_actors};
+
+/// Drop shadow configuration.
+/// Maps to an SVG filter using feGaussianBlur + feOffset + feMerge for maximum compatibility.
+#[derive(Debug, Clone, Copy)]
+pub struct DropShadow {
+    /// Horizontal offset (default: 2.0)
+    pub dx: f32,
+    /// Vertical offset (default: 2.0)
+    pub dy: f32,
+    /// Blur radius (default: 3.0)
+    pub std_deviation: f32,
+    /// Shadow color as RGBA (default: black at 50% opacity)
+    pub color: [u8; 4],
+}
+
+impl Default for DropShadow {
+    fn default() -> Self {
+        Self {
+            dx: 2.0,
+            dy: 2.0,
+            std_deviation: 3.0,
+            color: [0x00, 0x00, 0x00, 0x80], // black, 50% opacity
+        }
+    }
+}
 
 /// Style configuration for stroke widths, corner radii, and dash patterns.
 pub struct StyleConfig {
@@ -97,8 +121,40 @@ pub struct RenderOptions {
     pub max_height: Option<f32>,
     /// RGBA activation box fill color (default: white)
     pub activation_fill: [u8; 4],
-    /// RGBA frame background fill color (default: nearly transparent)
-    pub frame_fill: [u8; 4],
+    /// RGBA frame fill colors per nesting depth (up to 5 levels).
+    /// `None` entries fall back to the previous level, or to the built-in default.
+    /// Built-in defaults: level 0 = fully transparent, levels 1+ = light blue ~10% opacity.
+    pub frame_fills: [Option<[u8; 4]>; 5],
+    /// Drop shadow for actor boxes. None = no shadow.
+    pub actor_shadow: Option<DropShadow>,
+    /// Drop shadow for note boxes. None = no shadow.
+    pub note_shadow: Option<DropShadow>,
+}
+
+/// Built-in frame fill defaults per nesting depth.
+const DEFAULT_FRAME_FILLS: [[u8; 4]; 5] = [
+    [0xFF, 0xFF, 0xFF, 0x00], // depth 0: fully transparent (like websequencediagrams)
+    [0xBB, 0xCC, 0xDD, 0x1A], // depth 1: light blue, ~10% opacity
+    [0xBB, 0xCC, 0xDD, 0x26], // depth 2: light blue, ~15% opacity
+    [0xBB, 0xCC, 0xDD, 0x33], // depth 3: light blue, ~20% opacity
+    [0xBB, 0xCC, 0xDD, 0x40], // depth 4: light blue, ~25% opacity
+];
+
+impl RenderOptions {
+    /// Resolve the frame fill color for a given nesting depth.
+    /// Checks user overrides first, falling back through previous levels,
+    /// then to the built-in defaults.
+    pub fn frame_fill_for_depth(&self, depth: usize) -> [u8; 4] {
+        let clamped = depth.min(4);
+        // Check this level and fall back through previous levels
+        for d in (0..=clamped).rev() {
+            if let Some(color) = self.frame_fills[d] {
+                return color;
+            }
+        }
+        // No user override at any level — use built-in default
+        DEFAULT_FRAME_FILLS[clamped]
+    }
 }
 
 impl Default for RenderOptions {
@@ -118,7 +174,9 @@ impl Default for RenderOptions {
             max_width: None,
             max_height: None,
             activation_fill: [0xFF, 0xFF, 0xFF, 0xFF],
-            frame_fill: [0xF8, 0xF8, 0xF8, 0xFF],
+            frame_fills: [None; 5], // all None = use built-in defaults
+            actor_shadow: None,
+            note_shadow: None,
         }
     }
 }
@@ -160,66 +218,29 @@ pub fn render_to_svg(input: &str, options: Option<RenderOptions>) -> Result<Stri
 }
 
 /// Render a sequence diagram to PNG bytes.
+///
+/// Internally renders to SVG first, then rasterizes via resvg.
+/// This guarantees pixel-perfect parity between SVG and PNG output.
 pub fn render_to_png(
     input: &str,
     options: Option<RenderOptions>,
 ) -> Result<Vec<u8>, SeqDiagramError> {
-    let pixmap = render_to_pixmap(input, options)?;
+    let svg = render_to_svg(input, options)?;
+
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_str(&svg, &opt)
+        .map_err(|e| SeqDiagramError::Render(format!("SVG parse error: {e}")))?;
+
+    let size = tree.size();
+    let width = size.width().ceil() as u32;
+    let height = size.height().ceil() as u32;
+
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width.max(1), height.max(1))
+        .ok_or_else(|| SeqDiagramError::Render("Failed to create pixmap".into()))?;
+
+    resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+
     pixmap
         .encode_png()
         .map_err(|e| SeqDiagramError::Render(e.to_string()))
-}
-
-/// Render a sequence diagram to a tiny_skia::Pixmap.
-pub fn render_to_pixmap(
-    input: &str,
-    options: Option<RenderOptions>,
-) -> Result<tiny_skia::Pixmap, SeqDiagramError> {
-    let opts = options.unwrap_or_default();
-    let font_size_px = opts.font_size_pt * opts.scale;
-
-    let doc = parse::parse_document(input)?;
-    let diagram_font = load_font(&opts)?;
-    let layout = layout::layout_diagram(&diagram_font, &doc, font_size_px, opts.padding as f32)?;
-
-    let natural_w = layout.width;
-    let natural_h = layout.height;
-
-    // Compute uniform scale factor for max constraints
-    let scale_factor = match (opts.max_width, opts.max_height) {
-        (Some(mw), Some(mh)) => {
-            let sw = mw / natural_w;
-            let sh = mh / natural_h;
-            sw.min(sh).min(1.0) // never scale up
-        }
-        (Some(mw), None) => (mw / natural_w).min(1.0),
-        (None, Some(mh)) => (mh / natural_h).min(1.0),
-        (None, None) => 1.0,
-    };
-
-    let img_width = (natural_w * scale_factor).ceil() as u32;
-    let img_height = (natural_h * scale_factor).ceil() as u32;
-    let img_width = img_width.max(1);
-    let img_height = img_height.max(1);
-
-    let mut pixmap = tiny_skia::Pixmap::new(img_width, img_height)
-        .ok_or_else(|| SeqDiagramError::Render("Failed to create pixmap".into()))?;
-
-    let bg = tiny_skia::Color::from_rgba8(
-        opts.bg_color[0],
-        opts.bg_color[1],
-        opts.bg_color[2],
-        opts.bg_color[3],
-    );
-    pixmap.fill(bg);
-
-    let transform = if scale_factor < 1.0 {
-        tiny_skia::Transform::from_scale(scale_factor, scale_factor)
-    } else {
-        tiny_skia::Transform::identity()
-    };
-
-    png_render::render_diagram(&diagram_font, &mut pixmap, &layout, &opts, transform);
-
-    Ok(pixmap)
 }

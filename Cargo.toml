@@ -13,7 +13,8 @@ unicode-fonts = []
 pest = "2.7"
 pest_derive = "2.7"
 skrifa = "0.41"
-tiny-skia = "0.12"
+resvg = "0.46"
+usvg = "0.46"
 thiserror = "2"
 
 [dev-dependencies]

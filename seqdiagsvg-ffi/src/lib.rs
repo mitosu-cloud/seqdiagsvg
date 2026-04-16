@@ -47,7 +47,7 @@ struct ThemeColors {
     actor_text: [u8; 4],
     note_text: [u8; 4],
     activation_fill: [u8; 4],
-    frame_fill: [u8; 4],
+    frame_fill: Option<[u8; 4]>,
 }
 
 /// Extract fg/bg/note RGBA colors from Mitosu theme JSON.
@@ -134,14 +134,9 @@ fn extract_colors(theme_json: &str) -> Result<ThemeColors, SeqDiagError> {
             [0xFF, 0xFF, 0xFF, 0xFF]
         });
 
-    // Frame fill: seqdiag.frameFill -> default (nearly transparent tint)
+    // Frame fill: seqdiag.frameFill -> None (use built-in depth-based defaults)
     let frame_fill = get("seqdiag.frameFill")
-        .and_then(|hex| parse_hex_color(&hex))
-        .unwrap_or(if is_dark {
-            [0x2A, 0x2A, 0x2A, 0xFF]
-        } else {
-            [0xF8, 0xF8, 0xF8, 0xFF]
-        });
+        .and_then(|hex| parse_hex_color(&hex));
 
     Ok(ThemeColors { fg, bg, note_color, actor_fill, actor_text, note_text, activation_fill, frame_fill })
 }
@@ -264,7 +259,14 @@ pub fn render_seqdiag_for_note(
         max_width: if width > 0.0 { Some(width) } else { None },
         max_height: if height > 0.0 { Some(height) } else { None },
         activation_fill: theme.activation_fill,
-        frame_fill: theme.frame_fill,
+        frame_fills: {
+            let mut fills = [None; 5];
+            if let Some(c) = theme.frame_fill {
+                // If a theme specifies a single frame fill, apply it to all levels
+                fills[0] = Some(c);
+            }
+            fills
+        },
     };
 
     // Write to a temp file then atomically rename to prevent partial reads
